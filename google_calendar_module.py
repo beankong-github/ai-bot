@@ -1,3 +1,4 @@
+import logging
 import requests
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -9,12 +10,21 @@ import json
 
 load_dotenv()
 
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+# drive_module.py와 반드시 동일한 스코프 목록을 유지해야 한다.
+# 두 모듈이 하나의 token.json을 공유하기 때문에,
+# 스코프가 달라지면 한 쪽에서 인증 오류가 발생한다.
+SCOPES = [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/drive',
+]
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TOKEN_PATH = os.path.join(BASE_DIR, 'token.json')
-CREDS_PATH = os.path.join(BASE_DIR, 'credentials.json')
+TOKEN_PATH = os.path.join(BASE_DIR, 'token.json')    # OAuth2 토큰 (gitignore 대상)
+CREDS_PATH = os.path.join(BASE_DIR, 'credentials.json')  # Google Cloud 앱 자격증명
+
 
 def get_calendar_service():
+    # 토큰이 만료됐을 때 refresh_token으로 자동 갱신한다.
+    # 갱신된 토큰은 token.json에 즉시 덮어쓴다.
     creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
@@ -22,10 +32,18 @@ def get_calendar_service():
             f.write(creds.to_json())
     return build('calendar', 'v3', credentials=creds)
 
+
 def parse_schedule_with_gemini(text):
+    """자연어 텍스트에서 일정 정보를 파싱해 dict로 반환한다.
+
+    날짜를 특정할 수 없으면 None을 반환하고, 호출한 쪽에서 재입력을 요청한다.
+    모델은 gemini-2.0-flash-lite — 일정 파싱은 경량 모델로 충분하고 무료 한도가 넉넉하다.
+    """
     today = datetime.now().strftime("%Y-%m-%d")
     api_key = os.getenv("GEMINI_API_KEY")
 
+    # 오늘 날짜를 프롬프트에 포함시켜 "내일", "다음 주 화요일" 같은
+    # 상대 날짜 표현도 절대 날짜로 변환되도록 유도한다.
     prompt = f"""오늘 날짜: {today}
 다음 텍스트에서 일정 정보를 추출해서 JSON으로만 응답해. 다른 말은 절대 하지 마.
 
@@ -47,10 +65,19 @@ def parse_schedule_with_gemini(text):
         json={"contents": [{"parts": [{"text": prompt}]}]}
     )
 
-    raw = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+    resp_json = response.json()
+    # Gemini API 무료 한도 초과나 안전 필터 차단 시 candidates 키 자체가 없는 응답이 온다.
+    # 이 경우 None을 반환해서 사용자에게 재입력을 요청하도록 한다.
+    if "candidates" not in resp_json:
+        logging.error(f"Gemini 응답 이상: {resp_json}")
+        return None
+
+    raw = resp_json["candidates"][0]["content"]["parts"][0]["text"]
+    # Gemini가 JSON 앞뒤에 마크다운 코드 블록을 붙이는 경우가 있어서 제거한다.
     raw = raw.strip().replace("```json", "").replace("```", "").strip()
 
     if raw == "null":
+        # 날짜 특정 불가 — 사용자가 날짜 없이 입력한 경우
         return None
 
     parsed = json.loads(raw)
@@ -58,7 +85,13 @@ def parse_schedule_with_gemini(text):
         return None
     return parsed
 
+
 def add_event(text):
+    """일정 채널 메시지를 파싱해서 Google Calendar에 등록한다.
+
+    반환값: (성공 여부, 확인 메시지 문자열)
+    파싱 실패 시 (False, None) 반환 → main.py에서 재입력 메시지 전송.
+    """
     parsed = parse_schedule_with_gemini(text)
     if not parsed:
         return False, None
@@ -71,6 +104,8 @@ def add_event(text):
     is_allday = parsed.get("is_allday", True)
 
     if not is_allday and time:
+        # 시각이 있는 일정: 시작 시각에서 1시간을 기본 종료 시각으로 설정한다.
+        # Google Calendar는 종료 시각이 필수이고, 사용자가 따로 지정하지 않으므로 1시간을 기본값으로 쓴다.
         start_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
         end_dt   = start_dt + timedelta(hours=1)
         event = {
@@ -80,6 +115,8 @@ def add_event(text):
         }
         time_str = start_dt.strftime('%m/%d %H:%M')
     else:
+        # 종일 일정: Google Calendar API는 종료 날짜를 "exclusive" 로 받는다.
+        # 4월 27일 하루짜리 일정이면 end.date를 4월 28일로 보내야 한다.
         end_date = (datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
         event = {
             'summary': title,
