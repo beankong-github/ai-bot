@@ -20,8 +20,11 @@ TOKEN_PATH = os.path.join(BASE_DIR, 'token.json')
 
 flow = InstalledAppFlow.from_client_secrets_file(CREDS_PATH, SCOPES)
 
-# 브라우저 없는 환경용 — URL 출력 후 코드 입력 방식
-creds = flow.run_console()
+# Pi(헤드리스) 환경용 — SSH 포트 포워딩 방식
+# PC에서 먼저 새 터미널로 터널을 열어야 한다:
+#   ssh -L 8080:localhost:8080 -p 2222 bk@bkpie00.duckdns.org
+# 그 후 Pi에서 이 스크립트 실행 → 출력된 URL을 PC 브라우저에서 열기
+creds = flow.run_local_server(port=8080, open_browser=False)
 
 with open(TOKEN_PATH, 'w') as f:
     f.write(creds.to_json())
