@@ -136,22 +136,37 @@ def add_event(text):
     return True, result_msg
 
 
+PERSONA_PATH = os.path.join(BASE_DIR, 'persona_daesanghyuk.md')
+
+
+def _load_persona() -> str:
+    # 페르소나 파일을 런타임에 읽어서 프롬프트에 주입한다.
+    # 페르소나 수정 시 persona_daesanghyuk.md만 편집하면 코드 변경 없이 반영된다.
+    try:
+        with open(PERSONA_PATH, encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        logging.warning("persona_daesanghyuk.md 파일을 찾을 수 없습니다.")
+        return ""
+
+
 def parse_todo_and_comment(text: str) -> dict:
     """Todo 채널 자연어 메시지를 파싱하고 대상혁 페르소나 코멘트를 함께 생성한다.
 
     일정 파싱과 달리 의도 분류 + 코멘트 생성을 한 번의 Gemini 호출로 처리한다.
-
-    반환 예시:
-      {"intent": "add_todo", "text": "헬스장 가기", "comment": "작은 습관이 큰 차이를 만든다 💪"}
-      {"intent": "add_habit", "text": "독서 30분", "comment": "꾸준함이 전부다 📚"}
-      {"intent": "query", "comment": ""}
-      {"intent": "complete", "number": 2, "comment": "하나씩 해내는 거다 ✅"}
-      {"intent": "unknown", "comment": ""}
+    페르소나는 persona_daesanghyuk.md에서 읽어와 프롬프트에 주입한다.
     """
     api_key = os.getenv("GEMINI_API_KEY")
+    persona = _load_persona()
 
-    prompt = f"""너는 '대상혁'이라는 엄격하지만 진심으로 응원하는 코치 페르소나야.
-사용자가 Todo 채널에 메시지를 보냈어. 의도를 파악하고 짧은 코멘트도 함께 JSON으로만 응답해. 다른 말은 절대 하지 마.
+    prompt = f"""아래는 네가 따라야 할 페르소나 정의다.
+
+{persona}
+
+---
+
+위 페르소나로서 사용자의 Todo 채널 메시지를 분석해라.
+의도를 파악하고 페르소나에 맞는 코멘트를 JSON으로만 응답해라. 다른 말은 절대 하지 마.
 
 메시지: "{text}"
 
@@ -163,10 +178,10 @@ intent 종류:
 - unknown: 위에 해당하지 않음
 
 응답 형식 (JSON만):
-{{"intent": "add_todo", "text": "추출한 할 일 내용", "comment": "10단어 이내 코멘트 + 이모지 1개"}}
-{{"intent": "add_habit", "text": "추출한 습관 내용", "comment": "10단어 이내 코멘트 + 이모지 1개"}}
+{{"intent": "add_todo", "text": "추출한 할 일 내용", "comment": "2문장 이내 코멘트"}}
+{{"intent": "add_habit", "text": "추출한 습관 내용", "comment": "2문장 이내 코멘트"}}
 {{"intent": "query", "comment": ""}}
-{{"intent": "complete", "number": 숫자, "comment": "10단어 이내 완료 격려 코멘트 + 이모지 1개"}}
+{{"intent": "complete", "number": 숫자, "comment": "2문장 이내 코멘트"}}
 {{"intent": "unknown", "comment": ""}}"""
 
     response = requests.post(
