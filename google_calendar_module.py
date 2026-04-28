@@ -178,11 +178,14 @@ intent 종류:
 - unknown: 위에 해당하지 않음
 
 응답 형식 (JSON만):
-{{"intent": "add_todo", "text": "추출한 할 일 내용", "comment": "2문장 이내 코멘트"}}
-{{"intent": "add_habit", "text": "추출한 습관 내용", "comment": "2문장 이내 코멘트"}}
+{{"intent": "add_todo", "texts": ["할 일1", "할 일2"], "comment": "1문장 이내 코멘트"}}
+{{"intent": "add_habit", "text": "추출한 습관 내용", "comment": "1문장 이내 코멘트"}}
 {{"intent": "query", "comment": ""}}
-{{"intent": "complete", "number": 숫자, "comment": "2문장 이내 코멘트"}}
-{{"intent": "unknown", "comment": ""}}"""
+{{"intent": "complete", "number": 숫자, "comment": "1문장 이내 코멘트"}}
+{{"intent": "unknown", "comment": ""}}
+
+add_todo의 texts는 반드시 리스트여야 한다. 메시지에 할 일이 여러 개 담겨 있으면 각각 분리해서 배열에 담아라.
+예: "씻고 자야지" → {{"intent": "add_todo", "texts": ["씻기", "잠들기"], "comment": "..."}}"""
 
     response = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={api_key}",

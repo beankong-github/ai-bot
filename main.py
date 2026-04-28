@@ -82,9 +82,12 @@ async def handle_todo_channel(msg, text: str):
         await msg.reply_text(get_today_todos())
 
     elif intent == "add_todo":
-        todo_text = parsed.get("text", text)
-        add_todo(todo_text)
-        reply = f"✅ 할 일 추가했습니다.\n{todo_text}"
+        # 여러 할 일이 한 문장에 담긴 경우 texts 리스트로 받아 각각 저장
+        texts = parsed.get("texts", [parsed.get("text", text)])
+        for t in texts:
+            add_todo(t)
+        items = "\n".join(f"{i}. {t}" for i, t in enumerate(texts, 1))
+        reply = f"✅ 할 일 추가했습니다.\n{items}"
         if comment:
             reply += f"\n\n{comment}"
         await msg.reply_text(reply)
