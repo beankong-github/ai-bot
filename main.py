@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 
 from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo
-from google_calendar_module import add_event
+from google_calendar_module import add_event, parse_todo_and_comment
 
 load_dotenv()
 
@@ -37,38 +37,93 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_todo_channel(msg, text: str):
-    """Todo 채널 메시지를 명령어에 따라 분기 처리한다."""
+    """Todo 채널 메시지 처리.
 
+    !명령어는 Gemini 호출 없이 즉시 처리한다 (빠름, API 절약).
+    그 외 자연어는 Gemini로 의도 파싱 + 페르소나 코멘트 생성.
+    """
+    # ── ! 명령어 직접 처리 ──────────────────────────────────────────────────────
     if text.strip() == "!조회":
-        # 습관 + 오늘 할 일 목록 조회
-        result = get_today_todos()
-        await msg.reply_text(result)
+        await msg.reply_text(get_today_todos())
+        return
 
-    elif text.startswith("!습관 "):
-        # !습관 뒤의 텍스트를 habits.md에 추가
+    if text.startswith("!습관 "):
         habit_text = text[len("!습관 "):].strip()
         if not habit_text:
             await msg.reply_text("습관 내용을 입력해주세요.\n예: !습관 운동 30분")
             return
-        add_habit(habit_text)
-        await msg.reply_text(f"🔁 습관 추가했습니다.\n{habit_text}")
+        success = add_habit(habit_text)
+        await msg.reply_text(f"🔁 습관 추가했습니다.\n{habit_text}" if success
+                              else f"이미 등록된 습관입니다.\n{habit_text}")
+        return
 
-    elif text.startswith("!완료 "):
-        # !완료 뒤의 번호로 해당 항목을 완료 처리
+    if text.startswith("!완료 "):
         num_str = text[len("!완료 "):].strip()
         if not num_str.isdigit():
             await msg.reply_text("번호를 입력해주세요.\n예: !완료 2")
             return
         success = complete_todo(int(num_str))
+        await msg.reply_text(f"✅ {num_str}번 완료했습니다." if success
+                              else f"❌ {num_str}번 항목을 찾지 못했습니다.\n할 일 목록을 확인해주세요.")
+        return
+
+    if text.startswith("!할일 "):
+        todo_text = text[len("!할일 "):].strip()
+        add_todo(todo_text)
+        await msg.reply_text(f"✅ 할 일 추가했습니다.\n{todo_text}")
+        return
+
+    # ── 자연어 → Gemini 파싱 ────────────────────────────────────────────────────
+    parsed = parse_todo_and_comment(text)
+    intent = parsed.get("intent", "unknown")
+    comment = parsed.get("comment", "")
+
+    if intent == "query":
+        await msg.reply_text(get_today_todos())
+
+    elif intent == "add_todo":
+        todo_text = parsed.get("text", text)
+        add_todo(todo_text)
+        reply = f"✅ 할 일 추가했습니다.\n{todo_text}"
+        if comment:
+            reply += f"\n\n{comment}"
+        await msg.reply_text(reply)
+
+    elif intent == "add_habit":
+        habit_text = parsed.get("text", text)
+        success = add_habit(habit_text)
         if success:
-            await msg.reply_text(f"✅ {num_str}번 완료했습니다.")
+            reply = f"🔁 습관 추가했습니다.\n{habit_text}"
+            if comment:
+                reply += f"\n\n{comment}"
         else:
-            await msg.reply_text(f"❌ {num_str}번 항목을 찾지 못했습니다.\n!조회로 번호를 확인해주세요.")
+            # 이미 등록된 습관은 코멘트 없이 안내만
+            reply = f"이미 등록된 습관입니다.\n{habit_text}"
+        await msg.reply_text(reply)
+
+    elif intent == "complete":
+        num = parsed.get("number")
+        if num:
+            success = complete_todo(int(num))
+            if success:
+                reply = f"✅ {num}번 완료했습니다."
+                if comment:
+                    reply += f"\n\n{comment}"
+            else:
+                reply = f"❌ {num}번 항목을 찾지 못했습니다.\n할 일 목록을 확인해주세요."
+            await msg.reply_text(reply)
+        else:
+            await msg.reply_text("몇 번을 완료할까요?\n예: 2번 완료해줘")
 
     else:
-        # 명령어 없이 입력한 텍스트는 오늘 할 일로 바로 추가
-        add_todo(text)
-        await msg.reply_text(f"✅ 할 일 추가했습니다.\n{text}")
+        await msg.reply_text(
+            "이해하지 못했습니다.\n\n"
+            "예시:\n"
+            "• 오늘 할 일 보여줘\n"
+            "• 헬스장 가기 추가해줘\n"
+            "• 독서 30분 습관으로 등록해줘\n"
+            "• 2번 완료했어"
+        )
 
 
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
