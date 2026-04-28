@@ -61,7 +61,7 @@ def parse_schedule_with_gemini(text):
 날짜를 알 수 없으면 null만 반환."""
 
     response = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={api_key}",
+        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}",
         json={"contents": [{"parts": [{"text": prompt}]}]}
     )
 
