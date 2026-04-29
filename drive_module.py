@@ -269,34 +269,46 @@ def _tags_to_content(tags: list[str]) -> str:
 
 def get_tags_list() -> list[str]:
     """등록된 태그 목록을 리스트로 반환한다."""
-    service = get_drive_service()
-    inbox_id = _get_folder_id(service, "notes", "Inbox")
-    tags_id = _get_tags_file_id(service, inbox_id)
-    return _parse_tags(_read_file(service, tags_id))
+    try:
+        service = get_drive_service()
+        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        tags_id = _get_tags_file_id(service, inbox_id)
+        return _parse_tags(_read_file(service, tags_id))
+    except Exception as e:
+        logging.error(f"태그 목록 조회 실패: {e}")
+        return []
 
 
 def get_tags() -> str:
     """등록된 태그 목록을 텔레그램 메시지 형식으로 반환한다."""
-    service = get_drive_service()
-    inbox_id = _get_folder_id(service, "notes", "Inbox")
-    tags_id = _get_tags_file_id(service, inbox_id)
-    tags = _parse_tags(_read_file(service, tags_id))
-    if not tags:
-        return "등록된 태그가 없습니다.\n!태그추가 태그명 으로 추가해보세요."
-    return "🏷️ 태그 목록\n\n" + "\n".join(f"• {t}" for t in tags)
+    try:
+        service = get_drive_service()
+        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        tags_id = _get_tags_file_id(service, inbox_id)
+        tags = _parse_tags(_read_file(service, tags_id))
+        if not tags:
+            return "등록된 태그가 없습니다.\n!태그추가 태그명 으로 추가해보세요."
+        return "🏷️ 태그 목록\n\n" + "\n".join(f"• {t}" for t in tags)
+    except Exception as e:
+        logging.error(f"태그 조회 실패: {e}")
+        return "❌ 태그 목록을 불러오지 못했습니다."
 
 
 def add_tag(tag: str) -> bool:
     """태그를 추가한다. 이미 존재하면 False 반환."""
-    service = get_drive_service()
-    inbox_id = _get_folder_id(service, "notes", "Inbox")
-    tags_id = _get_tags_file_id(service, inbox_id)
-    tags = _parse_tags(_read_file(service, tags_id))
-    if tag in tags:
+    try:
+        service = get_drive_service()
+        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        tags_id = _get_tags_file_id(service, inbox_id)
+        tags = _parse_tags(_read_file(service, tags_id))
+        if tag in tags:
+            return False
+        tags.append(tag)
+        _write_file(service, tags_id, _tags_to_content(tags))
+        return True
+    except Exception as e:
+        logging.error(f"태그 추가 실패: {e}")
         return False
-    tags.append(tag)
-    _write_file(service, tags_id, _tags_to_content(tags))
-    return True
 
 
 def _parse_memo_frontmatter(content: str, filename: str) -> dict | None:
@@ -328,25 +340,29 @@ def _parse_memo_frontmatter(content: str, filename: str) -> dict | None:
 
 def get_today_memos() -> list[dict]:
     """오늘 날짜의 Inbox 메모 목록을 반환한다."""
-    service = get_drive_service()
-    inbox_id = _get_folder_id(service, "notes", "Inbox")
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    query = (
-        f"'{inbox_id}' in parents and name contains '{date_str}'"
-        f" and trashed=false and mimeType!='application/vnd.google-apps.folder'"
-    )
-    files = service.files().list(q=query, fields="files(id, name)").execute().get("files", [])
-    memos = []
-    for f in files:
-        if not f['name'].endswith('.md') or f['name'] == 'tags.md':
-            continue
-        try:
-            info = _parse_memo_frontmatter(_read_file(service, f['id']), f['name'])
-            if info:
-                memos.append(info)
-        except Exception:
-            logging.warning(f"메모 읽기 실패: {f['name']}")
-    return memos
+    try:
+        service = get_drive_service()
+        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        query = (
+            f"'{inbox_id}' in parents and name contains '{date_str}'"
+            f" and trashed=false and mimeType!='application/vnd.google-apps.folder'"
+        )
+        files = service.files().list(q=query, fields="files(id, name)").execute().get("files", [])
+        memos = []
+        for f in files:
+            if not f['name'].endswith('.md') or f['name'] == 'tags.md':
+                continue
+            try:
+                info = _parse_memo_frontmatter(_read_file(service, f['id']), f['name'])
+                if info:
+                    memos.append(info)
+            except Exception:
+                logging.warning(f"메모 읽기 실패: {f['name']}")
+        return memos
+    except Exception as e:
+        logging.error(f"오늘 메모 조회 실패: {e}")
+        return []
 
 
 def get_week_memo_stats(start_date: str, end_date: str) -> dict:
@@ -354,35 +370,43 @@ def get_week_memo_stats(start_date: str, end_date: str) -> dict:
 
     반환: {"total": N, "by_tag": {"운동": 3, ...}, "memos": [...]}
     """
-    service = get_drive_service()
-    inbox_id = _get_folder_id(service, "notes", "Inbox")
-    query = f"'{inbox_id}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'"
-    files = service.files().list(q=query, fields="files(id, name)").execute().get("files", [])
-    stats: dict = {"total": 0, "by_tag": {}, "memos": []}
-    for f in files:
-        name = f['name']
-        if not name.endswith('.md') or name == 'tags.md':
-            continue
-        try:
-            if not (start_date <= name[:10] <= end_date):
+    try:
+        service = get_drive_service()
+        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        query = f"'{inbox_id}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'"
+        files = service.files().list(q=query, fields="files(id, name)").execute().get("files", [])
+        stats: dict = {"total": 0, "by_tag": {}, "memos": []}
+        for f in files:
+            name = f['name']
+            if not name.endswith('.md') or name == 'tags.md':
                 continue
-            info = _parse_memo_frontmatter(_read_file(service, f['id']), name)
-            if not info:
+            try:
+                if not (start_date <= name[:10] <= end_date):
+                    continue
+                info = _parse_memo_frontmatter(_read_file(service, f['id']), name)
+                if not info:
+                    continue
+            except Exception:
                 continue
-        except Exception:
-            continue
-        stats["total"] += 1
-        stats["memos"].append({"title": info["title"], "tags": info["tags"]})
-        for tag in info["tags"]:
-            stats["by_tag"][tag] = stats["by_tag"].get(tag, 0) + 1
-    return stats
+            stats["total"] += 1
+            stats["memos"].append({"title": info["title"], "tags": info["tags"]})
+            for tag in info["tags"]:
+                stats["by_tag"][tag] = stats["by_tag"].get(tag, 0) + 1
+        return stats
+    except Exception as e:
+        logging.error(f"주간 메모 통계 조회 실패: {e}")
+        return {"total": 0, "by_tag": {}, "memos": []}
 
 
 def get_habit_streaks() -> str:
     """각 습관의 현재 연속 기록과 최고 연속 기록을 텍스트로 반환한다."""
-    service = get_drive_service()
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
-    habits = _parse_habits(_read_file(service, _get_habits_file_id(service, todo_folder_id)))
+    try:
+        service = get_drive_service()
+        todo_folder_id = _get_folder_id(service, "notes", "Todo")
+        habits = _parse_habits(_read_file(service, _get_habits_file_id(service, todo_folder_id)))
+    except Exception as e:
+        logging.error(f"습관 스트릭 조회 실패: {e}")
+        return ""
     if not habits:
         return ""
 
@@ -427,20 +451,24 @@ def get_habit_streaks() -> str:
 
 def get_week_habit_stats(start_date: str, end_date: str) -> str:
     """날짜 범위의 습관 이행 통계 텍스트를 반환한다."""
-    service = get_drive_service()
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
-    habits = _parse_habits(_read_file(service, _get_habits_file_id(service, todo_folder_id)))
-    if not habits:
-        return "등록된 습관 없음"
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-    total_days = (end_dt - start_dt).days + 1
-    lines = []
-    for h in habits:
-        count = sum(1 for d in h["completed_dates"] if start_date <= d <= end_date)
-        icon = "✅" if count == total_days else "📊"
-        lines.append(f"• {h['name']}: {count}/{total_days}일 {icon}")
-    return "\n".join(lines)
+    try:
+        service = get_drive_service()
+        todo_folder_id = _get_folder_id(service, "notes", "Todo")
+        habits = _parse_habits(_read_file(service, _get_habits_file_id(service, todo_folder_id)))
+        if not habits:
+            return "등록된 습관 없음"
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        total_days = (end_dt - start_dt).days + 1
+        lines = []
+        for h in habits:
+            count = sum(1 for d in h["completed_dates"] if start_date <= d <= end_date)
+            icon = "✅" if count == total_days else "📊"
+            lines.append(f"• {h['name']}: {count}/{total_days}일 {icon}")
+        return "\n".join(lines)
+    except Exception as e:
+        logging.error(f"주간 습관 통계 조회 실패: {e}")
+        return "통계 조회 실패"
 
 
 def save_report(content: str, report_type: str, date_str: str) -> str:
@@ -448,31 +476,43 @@ def save_report(content: str, report_type: str, date_str: str) -> str:
 
     report_type: "daily" 또는 "weekly"
     """
-    service = get_drive_service()
-    sub = "Weekly" if report_type == "weekly" else "Daily"
-    folder_id = _get_folder_id(service, "AI Reports", sub)
-    return _create_file(service, f"{date_str}.md", folder_id, content)
+    try:
+        service = get_drive_service()
+        sub = "Weekly" if report_type == "weekly" else "Daily"
+        folder_id = _get_folder_id(service, "AI Reports", sub)
+        return _create_file(service, f"{date_str}.md", folder_id, content)
+    except Exception as e:
+        logging.error(f"보고서 저장 실패: {e}")
+        return ""
 
 
 def confirm_memo(file_id: str):
     """draft 메모의 status를 confirmed로 변경한다."""
-    service = get_drive_service()
-    content = _read_file(service, file_id)
-    new_content = content.replace("status: draft", "status: confirmed", 1)
-    _write_file(service, file_id, new_content)
+    try:
+        service = get_drive_service()
+        content = _read_file(service, file_id)
+        new_content = content.replace("status: draft", "status: confirmed", 1)
+        _write_file(service, file_id, new_content)
+    except Exception as e:
+        logging.error(f"메모 확인 처리 실패: {e}")
+        raise
 
 
 def delete_tag(tag: str) -> bool:
     """태그를 삭제한다. 존재하지 않으면 False 반환."""
-    service = get_drive_service()
-    inbox_id = _get_folder_id(service, "notes", "Inbox")
-    tags_id = _get_tags_file_id(service, inbox_id)
-    tags = _parse_tags(_read_file(service, tags_id))
-    if tag not in tags:
+    try:
+        service = get_drive_service()
+        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        tags_id = _get_tags_file_id(service, inbox_id)
+        tags = _parse_tags(_read_file(service, tags_id))
+        if tag not in tags:
+            return False
+        tags.remove(tag)
+        _write_file(service, tags_id, _tags_to_content(tags))
+        return True
+    except Exception as e:
+        logging.error(f"태그 삭제 실패: {e}")
         return False
-    tags.remove(tag)
-    _write_file(service, tags_id, _tags_to_content(tags))
-    return True
 
 
 # ── Todo 공개 API ──────────────────────────────────────────────────────────────
@@ -528,7 +568,11 @@ def get_today_todos() -> str:
     daily 파일에 누락된 습관이 있으면 자동으로 추가한다.
     complete_todo()의 번호 체계와 반드시 동일하게 유지해야 한다.
     """
-    service = get_drive_service()
+    try:
+        service = get_drive_service()
+    except Exception as e:
+        logging.error(f"할 일 조회 실패 (Drive 인증): {e}")
+        return "❌ 할 일 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요."
     todo_folder_id = _get_folder_id(service, "notes", "Todo")
     date_str = datetime.now().strftime("%Y-%m-%d")
 

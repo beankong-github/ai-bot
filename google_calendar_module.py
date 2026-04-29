@@ -73,22 +73,34 @@ def format_events_text(events: list[dict], show_date: bool = False) -> str:
 
 def get_today_events_text() -> str:
     """오늘 일정을 텍스트로 반환한다."""
-    today = datetime.now(_KST).strftime("%Y-%m-%d")
-    return format_events_text(get_events(today, today))
+    try:
+        today = datetime.now(_KST).strftime("%Y-%m-%d")
+        return format_events_text(get_events(today, today))
+    except Exception as e:
+        logging.error(f"오늘 일정 조회 실패: {e}")
+        return "일정 조회 실패"
 
 
 def get_tomorrow_events_text() -> str:
     """내일 일정을 텍스트로 반환한다."""
-    tomorrow = (datetime.now(_KST) + timedelta(days=1)).strftime("%Y-%m-%d")
-    return format_events_text(get_events(tomorrow, tomorrow))
+    try:
+        tomorrow = (datetime.now(_KST) + timedelta(days=1)).strftime("%Y-%m-%d")
+        return format_events_text(get_events(tomorrow, tomorrow))
+    except Exception as e:
+        logging.error(f"내일 일정 조회 실패: {e}")
+        return "일정 조회 실패"
 
 
 def get_week_events_text() -> str:
     """이번 주(월~일) 일정을 텍스트로 반환한다."""
-    today = datetime.now(_KST)
-    monday = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
-    sunday = (today + timedelta(days=6 - today.weekday())).strftime("%Y-%m-%d")
-    return format_events_text(get_events(monday, sunday), show_date=True)
+    try:
+        today = datetime.now(_KST)
+        monday = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
+        sunday = (today + timedelta(days=6 - today.weekday())).strftime("%Y-%m-%d")
+        return format_events_text(get_events(monday, sunday), show_date=True)
+    except Exception as e:
+        logging.error(f"주간 일정 조회 실패: {e}")
+        return "일정 조회 실패"
 
 
 def add_event(text):
@@ -96,6 +108,7 @@ def add_event(text):
 
     반환값: (성공 여부, 확인 메시지 문자열)
     파싱 실패 시 (False, None) 반환 → main.py에서 재입력 메시지 전송.
+    Calendar API 오류 시 예외를 전파한다.
     """
     parsed = parse_schedule(text)
     if not parsed:
@@ -133,7 +146,11 @@ def add_event(text):
     if location:
         event['location'] = location
 
-    service.events().insert(calendarId='primary', body=event).execute()
+    try:
+        service.events().insert(calendarId='primary', body=event).execute()
+    except Exception as e:
+        logging.error(f"캘린더 일정 등록 실패: {e}")
+        raise
 
     result_msg = f"📅 등록했습니다.\n제목: {title}\n일시: {time_str}"
     if location:

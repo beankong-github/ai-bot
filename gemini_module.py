@@ -105,15 +105,26 @@ def get_rpd_stats(days: int = 7) -> dict:
 def _call_gemini(prompt: str) -> str | None:
     """Gemini API를 호출하고 텍스트 응답을 반환한다.
 
-    candidates 키가 없는 비정상 응답(한도 초과, 안전 필터 등)이면 None을 반환한다.
+    네트워크 오류, HTTP 오류, candidates 없는 응답이면 None을 반환한다.
     """
     api_key = os.getenv("GEMINI_API_KEY")
-    response = requests.post(
-        f"{GEMINI_API_URL}?key={api_key}",
-        json={"contents": [{"parts": [{"text": prompt}]}]},
-    )
-    resp_json = response.json()
+    try:
+        response = requests.post(
+            f"{GEMINI_API_URL}?key={api_key}",
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=30,
+        )
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Gemini 네트워크 오류: {e}")
+        return None
     _increment_rpd()
+    if response.status_code == 429:
+        logging.warning("Gemini RPD 한도 초과 (429)")
+        return None
+    if not response.ok:
+        logging.error(f"Gemini HTTP {response.status_code}: {response.text[:200]}")
+        return None
+    resp_json = response.json()
     if "candidates" not in resp_json:
         logging.error(f"Gemini 응답 이상: {resp_json}")
         return None

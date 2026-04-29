@@ -672,8 +672,8 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await msg.reply_text(reply + _rpd_warning())
 
     except Exception as e:
-        logging.error(f"처리 실패: {e}")
-        await msg.reply_text(f"❌ 오류가 발생했습니다: {e}")
+        logging.error(f"처리 실패: {e}", exc_info=True)
+        await msg.reply_text("❌ 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
 
 
 def main():
