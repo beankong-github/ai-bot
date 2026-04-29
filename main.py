@@ -16,7 +16,7 @@ from drive_module import (
 )
 from gemini_module import (
     parse_todo_and_comment, generate_memo_title, suggest_tags,
-    get_remaining_rpd, RPD_WARN_THRESHOLD,
+    get_remaining_rpd, RPD_LIMIT, RPD_WARN_THRESHOLD,
     generate_day_brief_content, generate_weekly_report_content,
     get_rpd_stats,
 )
@@ -531,7 +531,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         f"최근 7일 평균: {s['avg']}회/일\n"
                         f"최근 7일 최고: {s['max']}회\n"
                         f"(데이터 {s['days_with_data']}일치 기준)\n\n"
-                        f"일일 한도: {500}회"
+                        f"일일 한도: {RPD_LIMIT}회"
                     )
                 return
 
@@ -609,7 +609,20 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
 
         else:
-            pass  # DM 및 미등록 채널 무시
+            # DM 명령어
+            if text.strip() == "!통계":
+                s = get_rpd_stats(days=7)
+                if s["days_with_data"] == 0:
+                    await msg.reply_text("아직 통계 데이터가 없습니다. 며칠 사용 후 다시 확인해주세요.")
+                else:
+                    await msg.reply_text(
+                        f"📊 Gemini API 호출 통계\n\n"
+                        f"오늘: {s['today']}회\n"
+                        f"최근 7일 평균: {s['avg']}회/일\n"
+                        f"최근 7일 최고: {s['max']}회\n"
+                        f"(데이터 {s['days_with_data']}일치 기준)\n\n"
+                        f"일일 한도: {RPD_LIMIT}회"
+                    )
 
     except Exception as e:
         logging.error(f"처리 실패: {e}")
