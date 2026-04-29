@@ -49,7 +49,7 @@ async def _flush_memo(bot, chat_id: str, title: str | None = None):
     combined = "\n\n".join(messages)
     final_title = title or generate_memo_title(combined)
 
-    # 본문에 #태그 있으면 YAML에 반영 + 새 태그면 목록에도 자동 추가
+    # 본문에 #태그 있으면 YAML에 반영 + 새 태그면 목록에도 자동 추가 + 본문에서 제거
     content_tags = list(dict.fromkeys(
         m.lstrip('#') for m in re.findall(r'#\S+', combined) if m.lstrip('#')
     ))
@@ -57,6 +57,7 @@ async def _flush_memo(bot, chat_id: str, title: str | None = None):
         for tag in content_tags:
             add_tag(tag)  # 이미 있으면 무시, 없으면 tags.md에 추가
         recommended_tags = content_tags
+        combined = re.sub(r'#\S+', '', combined).strip()
     else:
         available_tags = get_tags_list()
         recommended_tags = suggest_tags(combined, available_tags) if available_tags else []
