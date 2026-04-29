@@ -441,3 +441,109 @@ def edit_todo(item_number: int, new_text: str) -> bool:
 
     _write_file(service, daily_id, _build_daily_content(sections))
     return True
+
+
+def delete_todo(item_number: int) -> bool:
+    """get_today_todos() 기준 번호로 미완료 할 일 항목을 삭제한다.
+
+    완료된 항목은 삭제할 수 없다 (False 반환).
+    습관 번호는 삭제할 수 없다 (False 반환).
+    """
+    service = get_drive_service()
+    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
+    habits_id = _get_habits_file_id(service, todo_folder_id)
+    habits = _parse_habits(_read_file(service, habits_id))
+
+    daily_id = _get_daily_file_id(service, todo_folder_id, date_str)
+    sections = _parse_daily_sections(_read_file(service, daily_id))
+    sections, _ = _sync_habits_to_daily(sections, habits)
+
+    num_habits = len(habits)
+    todo_lines = [(i, l) for i, l in enumerate(sections["todos"])
+                  if l.strip().startswith("- [ ]") or l.strip().startswith("- [x]")]
+
+    if not (1 <= item_number <= num_habits + len(todo_lines)):
+        return False
+
+    if item_number <= num_habits:
+        return False
+
+    todo_idx = item_number - num_habits - 1
+    line_idx, line_text = todo_lines[todo_idx]
+
+    if line_text.strip().startswith("- [x]"):
+        return False  # 완료 항목 삭제 불가
+
+    del sections["todos"][line_idx]
+    _write_file(service, daily_id, _build_daily_content(sections))
+    return True
+
+
+def uncomplete_todo(item_number: int) -> bool:
+    """get_today_todos() 기준 번호로 완료 항목을 미완료로 전환한다.
+
+    습관: daily 파일 완료 상태 제거 + habits.md 해당 날짜 완료 기록 제거.
+    할 일: daily 파일에서 완료 상태와 시각을 제거.
+    미완료 항목에 호출하면 False 반환.
+    """
+    service = get_drive_service()
+    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
+    habits_id = _get_habits_file_id(service, todo_folder_id)
+    habits = _parse_habits(_read_file(service, habits_id))
+
+    daily_id = _get_daily_file_id(service, todo_folder_id, date_str)
+    sections = _parse_daily_sections(_read_file(service, daily_id))
+    sections, _ = _sync_habits_to_daily(sections, habits)
+
+    num_habits = len(habits)
+    todo_lines = [(i, l) for i, l in enumerate(sections["todos"])
+                  if l.strip().startswith("- [ ]") or l.strip().startswith("- [x]")]
+
+    all_items = [("habit", h["name"]) for h in habits]
+    all_items += [("todo", i, l) for i, l in todo_lines]
+
+    if not (1 <= item_number <= len(all_items)):
+        return False
+
+    target = all_items[item_number - 1]
+
+    if target[0] == "habit":
+        habit_name = target[1]
+
+        # daily 파일: 완료 → 미완료
+        completed = False
+        for i, line in enumerate(sections["habits"]):
+            stripped = line.strip()
+            if stripped.startswith("- [x]"):
+                name = stripped.replace("- [x] ", "").split(" ✅")[0].strip()
+                if name == habit_name:
+                    sections["habits"][i] = f"- [ ] {habit_name}"
+                    completed = True
+                    break
+        if not completed:
+            return False  # 이미 미완료 상태
+        _write_file(service, daily_id, _build_daily_content(sections))
+
+        # habits.md: 오늘 날짜 완료 기록 제거
+        habits_list = _parse_habits(_read_file(service, habits_id))
+        for h in habits_list:
+            if h["name"] == habit_name and date_str in h["completed_dates"]:
+                h["completed_dates"].remove(date_str)
+                break
+        _write_file(service, habits_id, _habits_to_content(habits_list))
+
+    else:
+        _, line_idx, line_text = target
+        stripped = line_text.strip()
+        if not stripped.startswith("- [x]"):
+            return False  # 이미 미완료 상태
+        # ✅ 이후 시각 제거하고 미완료로 전환
+        new_text = stripped.replace("- [x] ", "- [ ] ", 1).split(" ✅")[0]
+        sections["todos"][line_idx] = new_text
+        _write_file(service, daily_id, _build_daily_content(sections))
+
+    return True

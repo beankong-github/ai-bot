@@ -176,6 +176,8 @@ intent 종류:
 - query: 할 일 목록 조회 요청
 - complete: 특정 번호 완료 처리 요청
 - edit_todo: 특정 번호 할 일 수정 요청
+- delete_todo: 특정 번호 할 일 삭제 요청
+- uncomplete: 특정 번호 완료 항목을 미완료로 전환 요청
 - unknown: 위에 해당하지 않음
 
 응답 형식 (JSON만):
@@ -184,6 +186,8 @@ intent 종류:
 {{"intent": "query", "comment": ""}}
 {{"intent": "complete", "number": 숫자, "comment": "1문장 이내 코멘트"}}
 {{"intent": "edit_todo", "number": 숫자, "text": "수정할 내용", "comment": "1문장 이내 코멘트"}}
+{{"intent": "delete_todo", "number": 숫자, "comment": "1문장 이내 코멘트"}}
+{{"intent": "uncomplete", "number": 숫자, "comment": "1문장 이내 코멘트"}}
 {{"intent": "unknown", "comment": ""}}
 
 add_todo의 texts는 반드시 리스트여야 한다. 메시지에 할 일이 여러 개 담겨 있으면 각각 분리해서 배열에 담아라.
