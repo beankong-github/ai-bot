@@ -299,6 +299,114 @@ def add_tag(tag: str) -> bool:
     return True
 
 
+def _parse_memo_frontmatter(content: str, filename: str) -> dict | None:
+    """메모 .md 파일에서 YAML frontmatter를 파싱한다."""
+    if not content.startswith('---'):
+        return None
+    parts = content.split('---', 2)
+    if len(parts) < 3:
+        return None
+    tags = []
+    status = "draft"
+    date_val = ""
+    for line in parts[1].strip().splitlines():
+        if line.startswith('tags:'):
+            tags_str = line[len('tags:'):].strip().strip('[]')
+            if tags_str:
+                tags = [t.strip() for t in tags_str.split(',') if t.strip()]
+        elif line.startswith('status:'):
+            status = line[len('status:'):].strip()
+        elif line.startswith('date:'):
+            date_val = line[len('date:'):].strip()
+    title = filename.rsplit('.md', 1)[0]
+    for line in parts[2].strip().splitlines():
+        if line.startswith('# '):
+            title = line[2:].strip()
+            break
+    return {"title": title, "tags": tags, "status": status, "date": date_val}
+
+
+def get_today_memos() -> list[dict]:
+    """오늘 날짜의 Inbox 메모 목록을 반환한다."""
+    service = get_drive_service()
+    inbox_id = _get_folder_id(service, "notes", "Inbox")
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    query = (
+        f"'{inbox_id}' in parents and name contains '{date_str}'"
+        f" and trashed=false and mimeType!='application/vnd.google-apps.folder'"
+    )
+    files = service.files().list(q=query, fields="files(id, name)").execute().get("files", [])
+    memos = []
+    for f in files:
+        if not f['name'].endswith('.md') or f['name'] == 'tags.md':
+            continue
+        try:
+            info = _parse_memo_frontmatter(_read_file(service, f['id']), f['name'])
+            if info:
+                memos.append(info)
+        except Exception:
+            logging.warning(f"메모 읽기 실패: {f['name']}")
+    return memos
+
+
+def get_week_memo_stats(start_date: str, end_date: str) -> dict:
+    """날짜 범위의 Inbox 메모 태그 통계를 반환한다.
+
+    반환: {"total": N, "by_tag": {"운동": 3, ...}, "memos": [...]}
+    """
+    service = get_drive_service()
+    inbox_id = _get_folder_id(service, "notes", "Inbox")
+    query = f"'{inbox_id}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'"
+    files = service.files().list(q=query, fields="files(id, name)").execute().get("files", [])
+    stats: dict = {"total": 0, "by_tag": {}, "memos": []}
+    for f in files:
+        name = f['name']
+        if not name.endswith('.md') or name == 'tags.md':
+            continue
+        try:
+            if not (start_date <= name[:10] <= end_date):
+                continue
+            info = _parse_memo_frontmatter(_read_file(service, f['id']), name)
+            if not info:
+                continue
+        except Exception:
+            continue
+        stats["total"] += 1
+        stats["memos"].append({"title": info["title"], "tags": info["tags"]})
+        for tag in info["tags"]:
+            stats["by_tag"][tag] = stats["by_tag"].get(tag, 0) + 1
+    return stats
+
+
+def get_week_habit_stats(start_date: str, end_date: str) -> str:
+    """날짜 범위의 습관 이행 통계 텍스트를 반환한다."""
+    service = get_drive_service()
+    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    habits = _parse_habits(_read_file(service, _get_habits_file_id(service, todo_folder_id)))
+    if not habits:
+        return "등록된 습관 없음"
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    total_days = (end_dt - start_dt).days + 1
+    lines = []
+    for h in habits:
+        count = sum(1 for d in h["completed_dates"] if start_date <= d <= end_date)
+        icon = "✅" if count == total_days else "📊"
+        lines.append(f"• {h['name']}: {count}/{total_days}일 {icon}")
+    return "\n".join(lines)
+
+
+def save_report(content: str, report_type: str, date_str: str) -> str:
+    """AI Reports 폴더에 보고서를 저장하고 파일 ID를 반환한다.
+
+    report_type: "daily" 또는 "weekly"
+    """
+    service = get_drive_service()
+    sub = "Weekly" if report_type == "weekly" else "Daily"
+    folder_id = _get_folder_id(service, "AI Reports", sub)
+    return _create_file(service, f"{date_str}.md", folder_id, content)
+
+
 def confirm_memo(file_id: str):
     """draft 메모의 status를 confirmed로 변경한다."""
     service = get_drive_service()

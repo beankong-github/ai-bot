@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import os
 
@@ -32,6 +32,63 @@ def get_calendar_service():
         with open(TOKEN_PATH, 'w') as f:
             f.write(creds.to_json())
     return build('calendar', 'v3', credentials=creds)
+
+
+_KST = timezone(timedelta(hours=9))
+
+
+def get_events(start_date: str, end_date: str) -> list[dict]:
+    """'YYYY-MM-DD' 형식 날짜 범위의 캘린더 이벤트를 반환한다."""
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=_KST)
+    end_dt = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=_KST)
+    service = get_calendar_service()
+    result = service.events().list(
+        calendarId='primary',
+        timeMin=start_dt.isoformat(),
+        timeMax=end_dt.isoformat(),
+        singleEvents=True,
+        orderBy='startTime'
+    ).execute()
+    return result.get('items', [])
+
+
+def format_events_text(events: list[dict], show_date: bool = False) -> str:
+    """이벤트 목록을 텍스트로 포매팅한다."""
+    if not events:
+        return "일정 없음"
+    lines = []
+    for e in events:
+        summary = e.get('summary', '(제목 없음)')
+        start = e['start'].get('dateTime', e['start'].get('date'))
+        location = e.get('location', '')
+        if 'T' in start:
+            dt = datetime.fromisoformat(start)
+            time_str = dt.strftime('%m/%d %H:%M') if show_date else dt.strftime('%H:%M')
+        else:
+            time_str = start if show_date else "종일"
+        loc_str = f" ({location})" if location else ""
+        lines.append(f"• {time_str} {summary}{loc_str}")
+    return "\n".join(lines)
+
+
+def get_today_events_text() -> str:
+    """오늘 일정을 텍스트로 반환한다."""
+    today = datetime.now(_KST).strftime("%Y-%m-%d")
+    return format_events_text(get_events(today, today))
+
+
+def get_tomorrow_events_text() -> str:
+    """내일 일정을 텍스트로 반환한다."""
+    tomorrow = (datetime.now(_KST) + timedelta(days=1)).strftime("%Y-%m-%d")
+    return format_events_text(get_events(tomorrow, tomorrow))
+
+
+def get_week_events_text() -> str:
+    """이번 주(월~일) 일정을 텍스트로 반환한다."""
+    today = datetime.now(_KST)
+    monday = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
+    sunday = (today + timedelta(days=6 - today.weekday())).strftime("%Y-%m-%d")
+    return format_events_text(get_events(monday, sunday), show_date=True)
 
 
 def add_event(text):

@@ -1,14 +1,28 @@
 import asyncio
 import logging
 import re
+from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 import os
 
-from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo, get_tags, get_tags_list, add_tag, delete_tag, confirm_memo
-from gemini_module import parse_todo_and_comment, generate_memo_title, suggest_tags, get_remaining_rpd, RPD_WARN_THRESHOLD
-from google_calendar_module import add_event
+from drive_module import (
+    save_memo, add_todo, add_habit, get_today_todos, complete_todo,
+    edit_todo, delete_todo, uncomplete_todo, get_tags, get_tags_list,
+    add_tag, delete_tag, confirm_memo,
+    get_today_memos, get_week_memo_stats, get_week_habit_stats, save_report,
+)
+from gemini_module import (
+    parse_todo_and_comment, generate_memo_title, suggest_tags,
+    get_remaining_rpd, RPD_WARN_THRESHOLD,
+    generate_day_brief_content, generate_weekly_report_content,
+)
+from google_calendar_module import (
+    add_event,
+    get_today_events_text, get_tomorrow_events_text, get_week_events_text,
+)
 
 load_dotenv()
 
@@ -35,6 +49,13 @@ _memo_timers:  dict[str, asyncio.Task] = {} # chat_id → 5분 자동 flush 태�
 _pending_drafts: dict[str, str] = {}        # chat_id → Drive 파일 ID (확인 대기 중)
 
 MEMO_FLUSH_DELAY = 300  # 5분
+
+# ── 브리프 답변 대기 상태 ───────────────────────────────────────────────────────
+# (brief_type, 전송 시각 timestamp) — 15분 이내 답변만 처리
+_awaiting_brief_reply: dict[str, tuple[str, float]] = {}
+BRIEF_REPLY_TIMEOUT = 900  # 15분
+
+_scheduler = AsyncIOScheduler(timezone='Asia/Seoul')
 
 
 async def _flush_memo(bot, chat_id: str, title: str | None = None):
@@ -79,6 +100,114 @@ def _rpd_warning() -> str:
     if remaining < RPD_WARN_THRESHOLD:
         return f"\n\n⚠️ 오늘 AI 호출 가능 횟수: {remaining}회 남음"
     return ""
+
+
+# ── 브리프 & 보고서 전송 ────────────────────────────────────────────────────────
+
+async def send_morning_brief(bot, chat_id: str):
+    """매일 08:00 모닝 브리프를 전송한다."""
+    try:
+        events_text = get_today_events_text()
+        todos_text = get_today_todos()
+        brief = (
+            f"🌅 좋은 아침입니다!\n\n"
+            f"📅 오늘 일정\n{events_text}\n\n"
+            f"{todos_text}\n\n"
+            f"💬 오늘 추가로 계획하신 게 있나요?\n"
+            f"있으시면 바로 답변해주세요. (15분 이내 — 일정/할 일로 자동 저장)"
+        )
+        await bot.send_message(chat_id=int(chat_id), text=brief)
+        _awaiting_brief_reply[chat_id] = ("morning", datetime.now().timestamp())
+    except Exception as e:
+        logging.error(f"모닝 브리프 전송 실패: {e}")
+
+
+async def send_day_brief(bot, chat_id: str):
+    """매일 22:00 데이 브리프를 전송한다. 오늘 기록이 없으면 전송하지 않는다."""
+    try:
+        memos = get_today_memos()
+        if not memos:
+            return
+        events_text = get_today_events_text()
+        tomorrow_text = get_tomorrow_events_text()
+        ai_content = generate_day_brief_content(memos, events_text)
+
+        tag_counts: dict[str, int] = {}
+        for m in memos:
+            for tag in m.get("tags", []):
+                tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        tag_text = (
+            "  ".join(f"#{k}({v})" for k, v in sorted(tag_counts.items(), key=lambda x: -x[1]))
+            if tag_counts else "태그 없음"
+        )
+
+        brief = (
+            f"🌙 오늘 하루 수고하셨습니다!\n\n"
+            f"📝 오늘 기록 ({len(memos)}건)\n{tag_text}\n\n"
+            f"📅 오늘 일정\n{events_text}\n\n"
+            f"📅 내일 일정\n{tomorrow_text}\n\n"
+            f"💬 {ai_content['question']}\n\n"
+            f"✨ {ai_content['summary']}"
+        )
+        brief += _rpd_warning()
+        await bot.send_message(chat_id=int(chat_id), text=brief)
+        _awaiting_brief_reply[chat_id] = ("day", datetime.now().timestamp())
+    except Exception as e:
+        logging.error(f"데이 브리프 전송 실패: {e}")
+
+
+async def send_weekly_report(bot, chat_id: str):
+    """매주 일요일 21:00 주간 보고서를 전송하고 Drive에 저장한다."""
+    try:
+        today = datetime.now()
+        monday = today - timedelta(days=today.weekday())
+        sunday = monday + timedelta(days=6)
+        start_date = monday.strftime("%Y-%m-%d")
+        end_date = sunday.strftime("%Y-%m-%d")
+        week_label = f"{monday.strftime('%m/%d')} ~ {sunday.strftime('%m/%d')}"
+
+        stats = get_week_memo_stats(start_date, end_date)
+        habits_text = get_week_habit_stats(start_date, end_date)
+        events_text = get_week_events_text()
+        ai_content = generate_weekly_report_content(stats, habits_text, events_text)
+
+        tag_text = (
+            "\n".join(f"• {k}: {v}회"
+                      for k, v in sorted(stats["by_tag"].items(), key=lambda x: -x[1]))
+            or "없음"
+        )
+
+        report = (
+            f"📊 주간 보고서 ({week_label})\n\n"
+            f"📝 이번 주 기록 ({stats['total']}건)\n{tag_text}\n\n"
+            f"📅 이번 주 일정\n{events_text}\n\n"
+            f"🔁 습관 이행 현황\n{habits_text}\n\n"
+            f"✨ {ai_content['summary']}\n\n"
+            f"💡 {ai_content['suggestion']}"
+        )
+        report += _rpd_warning()
+
+        save_report(f"# 주간 보고서 {week_label}\n\n{report}", "weekly", end_date)
+        await bot.send_message(chat_id=int(chat_id), text=report)
+    except Exception as e:
+        logging.error(f"주간 보고서 전송 실패: {e}")
+
+
+async def _setup_scheduler(application):
+    """봇 초기화 후 브리프 스케줄러를 시작한다."""
+    if not CH_DAILY:
+        logging.warning("CH_DAILY 미설정 — 브리프 스케줄러 비활성화")
+        return
+    bot = application.bot
+    _scheduler.add_job(send_morning_brief, 'cron', hour=8,  minute=0, args=[bot, CH_DAILY])
+    _scheduler.add_job(send_day_brief,     'cron', hour=22, minute=0, args=[bot, CH_DAILY])
+    _scheduler.add_job(
+        send_weekly_report, 'cron',
+        day_of_week='sun', hour=21, minute=0,
+        args=[bot, CH_DAILY],
+    )
+    _scheduler.start()
+    logging.info("브리프 스케줄러 시작 (모닝 08:00 / 데이 22:00 / 주간 일 21:00)")
 
 
 HELP_TODO = (
@@ -414,7 +543,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
                 return
 
-            # ── /done — 즉시 flush ───────────────────────────────────────────────
+            # ── /done — 즉시 flush (브리프 답변 대기 상태도 해제) ──────────────────
             if text.strip() == "/done" or text.startswith("/done "):
                 if not _memo_buffers.get(chat_id):
                     await msg.reply_text("묶을 메모가 없습니다.")
@@ -424,6 +553,24 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 manual_title = text[len("/done"):].strip() or None
                 await _flush_memo(ctx.bot, chat_id, title=manual_title)
                 return
+
+            # ── 브리프 답변 처리 (15분 이내 답변만) ──────────────────────────────────
+            if chat_id in _awaiting_brief_reply:
+                brief_type, brief_ts = _awaiting_brief_reply[chat_id]
+                if datetime.now().timestamp() - brief_ts <= BRIEF_REPLY_TIMEOUT:
+                    del _awaiting_brief_reply[chat_id]
+                    if brief_type == "morning":
+                        success, result_msg = add_event(text)
+                        if success:
+                            await msg.reply_text(f"📅 일정 추가\n{result_msg}" + _rpd_warning())
+                        else:
+                            add_todo(text)
+                            await msg.reply_text(f"✅ 할 일 추가\n{text}" + _rpd_warning())
+                    else:  # "day"
+                        save_memo(text, title="데이 브리프 답변")
+                        await msg.reply_text("📝 저장했습니다.")
+                    return
+                del _awaiting_brief_reply[chat_id]
 
             # ── 메모 버퍼에 누적 ─────────────────────────────────────────────────
             is_new_bundle = not _memo_buffers.get(chat_id)
@@ -459,7 +606,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).post_init(_setup_scheduler).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS & filters.TEXT, handle_message))

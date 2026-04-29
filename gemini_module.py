@@ -195,6 +195,77 @@ def suggest_tags(content: str, available_tags: list[str]) -> list[str]:
     return []
 
 
+def generate_day_brief_content(memos: list[dict], events_text: str) -> dict:
+    """데이 브리프 AI 맞춤 질문과 하루 총평을 생성한다.
+
+    반환: {"question": "...", "summary": "..."}
+    """
+    persona = _load_persona()
+    if memos:
+        memo_lines = "\n".join(
+            f"- {m['title']} (태그: {', '.join(m['tags']) or '없음'})" for m in memos
+        )
+    else:
+        memo_lines = "기록 없음"
+    prompt = f"""{persona}
+
+---
+
+오늘 하루 데이 브리프입니다. JSON으로만 응답해줘. 다른 말 하지 마.
+
+오늘 기록:
+{memo_lines}
+
+오늘 일정: {events_text}
+
+응답 형식:
+{{"question": "오늘 기록 기반 맞춤 질문 (30자 이내, 기록 없으면 '오늘 하루 어떠셨나요?')", "summary": "대상혁 페르소나로 하루 격려 총평 (50자 이내)"}}"""
+
+    raw = _call_gemini(prompt)
+    if raw:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            logging.error(f"데이 브리프 JSON 오류: {raw}")
+    return {"question": "오늘 하루 어떠셨나요?", "summary": "오늘도 수고했어요. 꾸준히 하는 게 가장 중요합니다."}
+
+
+def generate_weekly_report_content(stats: dict, habits_text: str, events_text: str) -> dict:
+    """주간 보고서 AI 총평과 다음 주 제안을 생성한다.
+
+    반환: {"summary": "...", "suggestion": "..."}
+    """
+    persona = _load_persona()
+    total = stats.get("total", 0)
+    tag_text = ", ".join(
+        f"{k}:{v}회" for k, v in sorted(stats.get("by_tag", {}).items(), key=lambda x: -x[1])
+    ) or "없음"
+    prompt = f"""{persona}
+
+---
+
+이번 주 보고서입니다. JSON으로만 응답해줘. 다른 말 하지 마.
+
+이번 주 기록: {total}건 (태그별: {tag_text})
+이번 주 습관:
+{habits_text}
+이번 주 일정: {events_text}
+
+응답 형식:
+{{"summary": "대상혁 페르소나로 이번 주 격려 총평 (70자 이내)", "suggestion": "다음 주를 위한 구체적인 제안 한 줄 (50자 이내)"}}"""
+
+    raw = _call_gemini(prompt)
+    if raw:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            logging.error(f"주간 보고서 JSON 오류: {raw}")
+    return {
+        "summary": "이번 주도 꾸준히 기록했네요. 이 습관을 유지해봐요.",
+        "suggestion": "다음 주도 오늘처럼 열심히 해봅시다."
+    }
+
+
 def generate_memo_title(content: str) -> str:
     """메모 내용에서 짧은 제목을 생성한다. 실패 시 현재 시각 문자열을 반환."""
     prompt = f"""다음 메모 내용을 보고 어울리는 짧은 제목을 한국어로 만들어줘.
