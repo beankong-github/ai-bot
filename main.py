@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 import os
 
 from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo
-from google_calendar_module import add_event, parse_todo_and_comment
+from gemini_module import parse_todo_and_comment
+from google_calendar_module import add_event
 
 load_dotenv()
 
