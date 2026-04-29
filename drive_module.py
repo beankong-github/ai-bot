@@ -395,3 +395,49 @@ def complete_todo(item_number: int) -> bool:
         _write_file(service, daily_id, _build_daily_content(sections))
 
     return True
+
+
+def edit_todo(item_number: int, new_text: str) -> bool:
+    """get_today_todos() 기준 번호로 할 일 항목의 텍스트를 수정한다.
+
+    습관 번호는 수정할 수 없다. 할 일(todo) 항목만 수정 가능.
+    완료된 항목은 텍스트를 바꾸되 완료 상태(✅ 시각)를 유지한다.
+    """
+    service = get_drive_service()
+    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    date_str = datetime.now().strftime("%Y-%m-%d")
+
+    habits_id = _get_habits_file_id(service, todo_folder_id)
+    habits = _parse_habits(_read_file(service, habits_id))
+
+    daily_id = _get_daily_file_id(service, todo_folder_id, date_str)
+    sections = _parse_daily_sections(_read_file(service, daily_id))
+    sections, _ = _sync_habits_to_daily(sections, habits)
+
+    # get_today_todos()와 동일한 번호 체계
+    num_habits = len(habits)
+    todo_lines = [(i, l) for i, l in enumerate(sections["todos"])
+                  if l.strip().startswith("- [ ]") or l.strip().startswith("- [x]")]
+
+    if not (1 <= item_number <= num_habits + len(todo_lines)):
+        return False
+
+    # 습관 번호는 수정 불가
+    if item_number <= num_habits:
+        return False
+
+    todo_idx = item_number - num_habits - 1
+    line_idx, line_text = todo_lines[todo_idx]
+    stripped = line_text.strip()
+
+    if stripped.startswith("- [x]"):
+        # 완료 상태 유지 — ✅ 이후 시각 부분도 그대로 보존
+        time_suffix = ""
+        if "✅" in stripped:
+            time_suffix = " ✅" + stripped.split("✅", 1)[1]
+        sections["todos"][line_idx] = f"- [x] {new_text}{time_suffix}"
+    else:
+        sections["todos"][line_idx] = f"- [ ] {new_text}"
+
+    _write_file(service, daily_id, _build_daily_content(sections))
+    return True

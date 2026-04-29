@@ -4,7 +4,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 from dotenv import load_dotenv
 import os
 
-from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo
+from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo
 from google_calendar_module import add_event, parse_todo_and_comment
 
 load_dotenv()
@@ -30,6 +30,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "  !조회 — 오늘 할 일 보기\n"
         "  !습관 내용 — 매일 반복 습관 추가\n"
         "  !완료 번호 — 항목 완료 처리\n"
+        "  !수정 번호 새텍스트 — 항목 수정\n"
         "  그 외 텍스트 — 오늘 할 일로 바로 추가\n"
         "📥 일상 메모 채널 → 메모 저장\n\n"
         "그냥 쓰세요. 생각하지 말고."
@@ -71,6 +72,19 @@ async def handle_todo_channel(msg, text: str):
         todo_text = text[len("!할일 "):].strip()
         add_todo(todo_text)
         await msg.reply_text(f"✅ 할 일 추가했습니다.\n{todo_text}")
+        return
+
+    if text.startswith("!수정 "):
+        # 형식: !수정 번호 새텍스트 (예: !수정 3 헬스장 예약 취소)
+        rest = text[len("!수정 "):].strip()
+        parts = rest.split(" ", 1)
+        if len(parts) < 2 or not parts[0].isdigit():
+            await msg.reply_text("형식: !수정 번호 새텍스트\n예: !수정 3 헬스장 예약 취소")
+            return
+        num, new_text = int(parts[0]), parts[1].strip()
+        success = edit_todo(num, new_text)
+        await msg.reply_text(f"✏️ {num}번을 수정했습니다.\n{new_text}" if success
+                              else f"❌ {num}번 항목을 찾지 못했습니다.\n할 일 목록을 확인해주세요.")
         return
 
     # ── 자연어 → Gemini 파싱 ────────────────────────────────────────────────────
@@ -117,6 +131,21 @@ async def handle_todo_channel(msg, text: str):
             await msg.reply_text(reply)
         else:
             await msg.reply_text("몇 번을 완료할까요?\n예: 2번 완료해줘")
+
+    elif intent == "edit_todo":
+        num = parsed.get("number")
+        new_text = parsed.get("text", "").strip()
+        if num and new_text:
+            success = edit_todo(int(num), new_text)
+            if success:
+                reply = f"✏️ {num}번을 수정했습니다.\n{new_text}"
+                if comment:
+                    reply += f"\n\n{comment}"
+            else:
+                reply = f"❌ {num}번 항목을 찾지 못했습니다.\n할 일 목록을 확인해주세요."
+            await msg.reply_text(reply)
+        else:
+            await msg.reply_text("몇 번을 어떻게 수정할까요?\n예: 3번 헬스장 예약 취소로 바꿔줘")
 
     else:
         await msg.reply_text(
