@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import re
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -221,9 +222,10 @@ def save_memo(content: str, title: str | None = None, tags: list[str] | None = N
     inbox_id = _get_folder_id(service, "notes", "Inbox")
 
     now = datetime.now()
-    filename = now.strftime("%Y-%m-%d-%H%M%S") + ".md"
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
     display_title = title or now.strftime("%Y-%m-%d %H:%M")
+    safe_title = re.sub(r'[/\\:*?"<>|]', '', display_title).strip()
+    filename = f"{now.strftime('%Y-%m-%d %H:%M')} {safe_title}.md" if safe_title else now.strftime("%Y-%m-%d-%H%M%S") + ".md"
 
     file_content = (
         f"---\n"
