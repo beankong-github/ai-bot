@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 
 from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo
-from gemini_module import parse_todo_and_comment, generate_memo_title
+from gemini_module import parse_todo_and_comment, generate_memo_title, get_remaining_rpd, RPD_WARN_THRESHOLD
 from google_calendar_module import add_event
 
 load_dotenv()
@@ -21,6 +21,13 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
+
+
+def _rpd_warning() -> str:
+    remaining = get_remaining_rpd()
+    if remaining < RPD_WARN_THRESHOLD:
+        return f"\n\n⚠️ 오늘 AI 호출 가능 횟수: {remaining}회 남음"
+    return ""
 
 
 HELP_TODO = (
@@ -164,6 +171,7 @@ async def handle_todo_channel(msg, text: str):
     parsed = parse_todo_and_comment(text)
     intent = parsed.get("intent", "unknown")
     comment = parsed.get("comment", "")
+    rpd_warn = _rpd_warning()
 
     if intent == "query":
         await msg.reply_text(get_today_todos())
@@ -177,7 +185,7 @@ async def handle_todo_channel(msg, text: str):
         reply = f"✅ 할 일 추가했습니다.\n{items}"
         if comment:
             reply += f"\n\n{comment}"
-        await msg.reply_text(reply)
+        await msg.reply_text(reply + rpd_warn)
 
     elif intent == "add_habit":
         habit_text = parsed.get("text", text)
@@ -189,7 +197,7 @@ async def handle_todo_channel(msg, text: str):
         else:
             # 이미 등록된 습관은 코멘트 없이 안내만
             reply = f"이미 등록된 습관입니다.\n{habit_text}"
-        await msg.reply_text(reply)
+        await msg.reply_text(reply + rpd_warn)
 
     elif intent == "complete":
         num = parsed.get("number")
@@ -201,7 +209,7 @@ async def handle_todo_channel(msg, text: str):
                     reply += f"\n\n{comment}"
             else:
                 reply = f"❌ {num}번 항목을 찾지 못했습니다.\n할 일 목록을 확인해주세요."
-            await msg.reply_text(reply)
+            await msg.reply_text(reply + rpd_warn)
         else:
             await msg.reply_text("몇 번을 완료할까요?\n예: 2번 완료해줘")
 
@@ -216,7 +224,7 @@ async def handle_todo_channel(msg, text: str):
                     reply += f"\n\n{comment}"
             else:
                 reply = f"❌ {num}번 항목을 찾지 못했습니다.\n할 일 목록을 확인해주세요."
-            await msg.reply_text(reply)
+            await msg.reply_text(reply + rpd_warn)
         else:
             await msg.reply_text("몇 번을 어떻게 수정할까요?\n예: 3번 헬스장 예약 취소로 바꿔줘")
 
@@ -239,7 +247,7 @@ async def handle_todo_channel(msg, text: str):
                     "완료된 항목이거나 존재하지 않는 번호입니다.\n"
                     "완료 항목은 먼저 미완료로 전환해주세요."
                 )
-            await msg.reply_text(reply)
+            await msg.reply_text(reply + rpd_warn)
         else:
             await msg.reply_text("몇 번을 삭제할까요?\n예: 3번 삭제해줘")
 
@@ -253,7 +261,7 @@ async def handle_todo_channel(msg, text: str):
                     reply += f"\n\n{comment}"
             else:
                 reply = f"❌ {num}번은 이미 미완료 상태이거나 존재하지 않습니다."
-            await msg.reply_text(reply)
+            await msg.reply_text(reply + rpd_warn)
         else:
             await msg.reply_text("몇 번을 미완료로 되돌릴까요?\n예: 3번 완료 취소해줘")
 
@@ -288,7 +296,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             # 자연어를 Gemini로 파싱해서 Google Calendar에 등록한다.
             success, result_msg = add_event(text)
             if success:
-                await msg.reply_text(result_msg)
+                await msg.reply_text(result_msg + _rpd_warning())
             else:
                 await msg.reply_text(
                     "📅 날짜를 찾지 못했습니다.\n"
@@ -304,7 +312,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
             title = generate_memo_title(text)
             save_memo(text, title=title)
-            await msg.reply_text("📝 저장했습니다.")
+            await msg.reply_text("📝 저장했습니다." + _rpd_warning())
 
         else:
             # 등록되지 않은 채널이나 DM은 일상 메모로 저장한다.

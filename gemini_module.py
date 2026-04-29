@@ -10,11 +10,45 @@ load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PERSONA_PATH = os.path.join(BASE_DIR, 'persona_daesanghyuk.md')
+RPD_COUNTER_PATH = os.path.join(BASE_DIR, 'rpd_counter.json')
 
 GEMINI_API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models"
     "/gemini-3.1-flash-lite-preview:generateContent"
 )
+
+RPD_LIMIT = 500
+RPD_WARN_THRESHOLD = 30
+
+_last_remaining_rpd: int = RPD_LIMIT
+
+
+def _increment_rpd() -> int:
+    """오늘 Gemini 호출 수를 1 증가시키고 남은 횟수를 반환한다. 날짜가 바뀌면 자동 초기화."""
+    global _last_remaining_rpd
+    today = datetime.now().strftime("%Y-%m-%d")
+    counter = {"date": today, "count": 0}
+
+    if os.path.exists(RPD_COUNTER_PATH):
+        try:
+            with open(RPD_COUNTER_PATH, 'r') as f:
+                data = json.load(f)
+            if data.get("date") == today:
+                counter = data
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    counter["count"] += 1
+    with open(RPD_COUNTER_PATH, 'w') as f:
+        json.dump(counter, f)
+
+    _last_remaining_rpd = max(0, RPD_LIMIT - counter["count"])
+    return _last_remaining_rpd
+
+
+def get_remaining_rpd() -> int:
+    """마지막 Gemini 호출 이후 남은 오늘 RPD를 반환한다."""
+    return _last_remaining_rpd
 
 
 def _call_gemini(prompt: str) -> str | None:
@@ -28,6 +62,7 @@ def _call_gemini(prompt: str) -> str | None:
         json={"contents": [{"parts": [{"text": prompt}]}]},
     )
     resp_json = response.json()
+    _increment_rpd()
     if "candidates" not in resp_json:
         logging.error(f"Gemini 응답 이상: {resp_json}")
         return None
