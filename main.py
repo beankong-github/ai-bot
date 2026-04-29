@@ -5,8 +5,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 from dotenv import load_dotenv
 import os
 
-from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo, get_tags, add_tag, delete_tag, confirm_memo
-from gemini_module import parse_todo_and_comment, generate_memo_title, get_remaining_rpd, RPD_WARN_THRESHOLD
+from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo, get_tags, get_tags_list, add_tag, delete_tag, confirm_memo
+from gemini_module import parse_todo_and_comment, generate_memo_title, suggest_tags, get_remaining_rpd, RPD_WARN_THRESHOLD
 from google_calendar_module import add_event
 
 load_dotenv()
@@ -43,17 +43,19 @@ async def _flush_memo(bot, chat_id: str, title: str | None = None):
 
     combined = "\n\n".join(messages)
     final_title = title or generate_memo_title(combined)
-    file_id = save_memo(combined, title=final_title)
-    title = final_title  # 미리보기 출력용
+
+    # 등록된 태그가 있으면 AI 추천, 없으면 Gemini 호출 생략
+    available_tags = get_tags_list()
+    recommended_tags = suggest_tags(combined, available_tags) if available_tags else []
+
+    file_id = save_memo(combined, title=final_title, tags=recommended_tags)
     _pending_drafts[chat_id] = file_id
 
     preview = combined if len(combined) <= 300 else combined[:300] + "..."
-    reply = (
-        f"📋 미리보기\n\n"
-        f"제목: {title}\n\n"
-        f"{preview}\n\n"
-        f"저장할까요?\n!확인 — 저장 확정  |  !취소 — 취소"
-    )
+    reply = f"📋 미리보기\n\n제목: {final_title}\n\n{preview}"
+    if recommended_tags:
+        reply += "\n\n🏷️ 추천 태그: " + " ".join(f"#{t}" for t in recommended_tags)
+    reply += "\n\n저장할까요?\n!확인 — 저장 확정  |  !취소 — 취소"
     reply += _rpd_warning()
     await bot.send_message(chat_id=int(chat_id), text=reply)
 

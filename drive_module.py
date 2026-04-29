@@ -265,6 +265,14 @@ def _tags_to_content(tags: list[str]) -> str:
     return result + "\n"
 
 
+def get_tags_list() -> list[str]:
+    """등록된 태그 목록을 리스트로 반환한다."""
+    service = get_drive_service()
+    inbox_id = _get_folder_id(service, "notes", "Inbox")
+    tags_id = _get_tags_file_id(service, inbox_id)
+    return _parse_tags(_read_file(service, tags_id))
+
+
 def get_tags() -> str:
     """등록된 태그 목록을 텔레그램 메시지 형식으로 반환한다."""
     service = get_drive_service()
