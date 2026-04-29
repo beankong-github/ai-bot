@@ -289,6 +289,14 @@ def add_tag(tag: str) -> bool:
     return True
 
 
+def confirm_memo(file_id: str):
+    """draft 메모의 status를 confirmed로 변경한다."""
+    service = get_drive_service()
+    content = _read_file(service, file_id)
+    new_content = content.replace("status: draft", "status: confirmed", 1)
+    _write_file(service, file_id, new_content)
+
+
 def delete_tag(tag: str) -> bool:
     """태그를 삭제한다. 존재하지 않으면 False 반환."""
     service = get_drive_service()

@@ -1,10 +1,11 @@
+import asyncio
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
 import os
 
-from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo, get_tags, add_tag, delete_tag
+from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo, get_tags, add_tag, delete_tag, confirm_memo
 from gemini_module import parse_todo_and_comment, generate_memo_title, get_remaining_rpd, RPD_WARN_THRESHOLD
 from google_calendar_module import add_event
 
@@ -21,6 +22,36 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
+
+
+# ── 메모 묶음 상태 ──────────────────────────────────────────────────────────────
+_memo_buffers: dict[str, list[str]] = {}   # chat_id → 누적 메시지 리스트
+_memo_timers:  dict[str, asyncio.Task] = {} # chat_id → 5분 자동 flush 태스크
+_pending_drafts: dict[str, str] = {}        # chat_id → Drive 파일 ID (확인 대기 중)
+
+MEMO_FLUSH_DELAY = 300  # 5분
+
+
+async def _flush_memo(bot, chat_id: str):
+    """버퍼 메시지를 하나로 묶어 draft로 저장하고 미리보기를 전송한다."""
+    messages = _memo_buffers.pop(chat_id, [])
+    if not messages:
+        return
+
+    combined = "\n\n".join(messages)
+    title = generate_memo_title(combined)
+    file_id = save_memo(combined, title=title)
+    _pending_drafts[chat_id] = file_id
+
+    preview = combined if len(combined) <= 300 else combined[:300] + "..."
+    reply = (
+        f"📋 미리보기\n\n"
+        f"제목: {title}\n\n"
+        f"{preview}\n\n"
+        f"저장할까요?\n!확인 — 저장 확정  |  !취소 — 취소"
+    )
+    reply += _rpd_warning()
+    await bot.send_message(chat_id=int(chat_id), text=reply)
 
 
 def _rpd_warning() -> str:
@@ -58,7 +89,12 @@ HELP_SCHEDULE = (
 HELP_DAILY = (
     "📥 일상 메모 채널 사용법\n"
     "\n"
-    "텍스트를 입력하면 Google Drive Inbox에 .md 파일로 저장됩니다.\n"
+    "텍스트를 입력하면 버퍼에 쌓이고, /done 또는 5분 후 자동으로 묶어 저장됩니다.\n"
+    "\n"
+    "💾 메모 묶음\n"
+    "/done              즉시 저장 및 미리보기\n"
+    "!확인              미리보기 확인 후 저장 확정\n"
+    "!취소              저장 취소 (draft로 남음)\n"
     "\n"
     "🏷️ 태그 명령어\n"
     "!태그              등록된 태그 목록 보기\n"
@@ -339,9 +375,63 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                                      else f"등록되지 않은 태그입니다: {tag}")
                 return
 
-            title = generate_memo_title(text)
-            save_memo(text, title=title)
-            await msg.reply_text("📝 저장했습니다." + _rpd_warning())
+            # ── 미리보기 승인 흐름 ────────────────────────────────────────────────
+            if text.strip() == "!확인":
+                if chat_id in _pending_drafts:
+                    confirm_memo(_pending_drafts.pop(chat_id))
+                    await msg.reply_text("✅ 메모가 저장됐습니다.")
+                else:
+                    await msg.reply_text("확인할 메모가 없습니다.")
+                return
+
+            if text.strip() == "!취소":
+                if chat_id in _pending_drafts:
+                    _pending_drafts.pop(chat_id)
+                    await msg.reply_text("취소했습니다. 파일은 draft 상태로 남아있습니다.")
+                else:
+                    await msg.reply_text("취소할 메모가 없습니다.")
+                return
+
+            # 미리보기 확인 대기 중이면 먼저 처리 요청
+            if chat_id in _pending_drafts:
+                await msg.reply_text(
+                    "이전 메모가 아직 확인되지 않았습니다.\n"
+                    "!확인 으로 저장하거나 !취소 후 새 메모를 입력해주세요."
+                )
+                return
+
+            # ── /done — 즉시 flush ───────────────────────────────────────────────
+            if text.strip() == "/done":
+                if not _memo_buffers.get(chat_id):
+                    await msg.reply_text("묶을 메모가 없습니다.")
+                    return
+                if chat_id in _memo_timers:
+                    _memo_timers.pop(chat_id).cancel()
+                await _flush_memo(ctx.bot, chat_id)
+                return
+
+            # ── 메모 버퍼에 누적 ─────────────────────────────────────────────────
+            is_new_bundle = not _memo_buffers.get(chat_id)
+            _memo_buffers.setdefault(chat_id, []).append(text)
+
+            # 타이머 리셋
+            if chat_id in _memo_timers:
+                _memo_timers.pop(chat_id).cancel()
+
+            bot = ctx.bot
+
+            async def _auto_flush():
+                await asyncio.sleep(MEMO_FLUSH_DELAY)
+                await _flush_memo(bot, chat_id)
+                _memo_timers.pop(chat_id, None)
+
+            _memo_timers[chat_id] = asyncio.create_task(_auto_flush())
+
+            if is_new_bundle:
+                await msg.reply_text(
+                    "📝 메모 받았습니다.\n"
+                    "계속 입력하거나 /done 으로 즉시 저장하세요. (5분 후 자동 저장)"
+                )
 
         else:
             # 등록되지 않은 채널이나 DM은 일상 메모로 저장한다.
