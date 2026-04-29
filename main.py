@@ -24,6 +24,10 @@ logging.basicConfig(
 )
 
 
+# ── 메모 확인/취소 자연어 ────────────────────────────────────────────────────────
+_CONFIRM_WORDS = {"ㄱㄱ", "ㅇㅇ", "응", "좋아", "네", "ok", "yes", "확인", "!확인", "저장"}
+_CANCEL_WORDS  = {"ㄴㄴ", "취소", "아니", "no", "싫어", "!취소"}
+
 # ── 메모 묶음 상태 ──────────────────────────────────────────────────────────────
 _memo_buffers: dict[str, list[str]] = {}   # chat_id → 누적 메시지 리스트
 _memo_timers:  dict[str, asyncio.Task] = {} # chat_id → 5분 자동 flush 태스크
@@ -99,12 +103,12 @@ HELP_DAILY = (
     "\n"
     "💾 메모 묶음\n"
     "/done [제목]        즉시 저장 및 미리보기 (제목 생략 시 AI 자동 생성)\n"
-    "!확인              미리보기 확인 후 저장 확정\n"
-    "!취소              저장 취소 (draft로 남음)\n"
+    "저장 확인: ㄱㄱ / 응 / 좋아 / 네 / !확인\n"
+    "저장 취소: ㄴㄴ / 취소 / 아니 / !취소\n"
     "\n"
     "🏷️ 태그 명령어\n"
+    "#태그명             태그 사용 (없으면 자동 추가)\n"
     "!태그              등록된 태그 목록 보기\n"
-    "!태그추가 <태그명>   태그 추가\n"
     "!태그삭제 <태그명>   태그 삭제"
 )
 
@@ -361,16 +365,6 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await msg.reply_text(get_tags())
                 return
 
-            if text.startswith("!태그추가 "):
-                tag = text[len("!태그추가 "):].strip()
-                if not tag:
-                    await msg.reply_text("태그명을 입력해주세요.\n예: !태그추가 운동")
-                    return
-                success = add_tag(tag)
-                await msg.reply_text(f"🏷️ '{tag}' 태그를 추가했습니다." if success
-                                     else f"이미 등록된 태그입니다: {tag}")
-                return
-
             if text.startswith("!태그삭제 "):
                 tag = text[len("!태그삭제 "):].strip()
                 if not tag:
@@ -381,28 +375,32 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                                      else f"등록되지 않은 태그입니다: {tag}")
                 return
 
-            # ── 미리보기 승인 흐름 ────────────────────────────────────────────────
-            if text.strip() == "!확인":
-                if chat_id in _pending_drafts:
+            # ── #태그명 단독 입력: 없으면 추가, 있으면 기존 태그 확인 ────────────────
+            stripped = text.strip()
+            if stripped and all(w.startswith('#') for w in stripped.split()):
+                results = []
+                for word in stripped.split():
+                    tag = word.lstrip('#')
+                    if tag:
+                        is_new = add_tag(tag)
+                        results.append(f"#{tag} {'추가됨' if is_new else '(기존)'}")
+                await msg.reply_text("🏷️ " + "  ".join(results))
+                return
+
+            # ── 미리보기 승인 흐름 (자연어 지원) ─────────────────────────────────────
+            if chat_id in _pending_drafts:
+                clean = text.strip().lower()
+                if clean in _CONFIRM_WORDS:
                     confirm_memo(_pending_drafts.pop(chat_id))
                     await msg.reply_text("✅ 메모가 저장됐습니다.")
-                else:
-                    await msg.reply_text("확인할 메모가 없습니다.")
-                return
-
-            if text.strip() == "!취소":
-                if chat_id in _pending_drafts:
+                    return
+                if clean in _CANCEL_WORDS:
                     _pending_drafts.pop(chat_id)
                     await msg.reply_text("취소했습니다. 파일은 draft 상태로 남아있습니다.")
-                else:
-                    await msg.reply_text("취소할 메모가 없습니다.")
-                return
-
-            # 미리보기 확인 대기 중이면 먼저 처리 요청
-            if chat_id in _pending_drafts:
+                    return
                 await msg.reply_text(
                     "이전 메모가 아직 확인되지 않았습니다.\n"
-                    "!확인 으로 저장하거나 !취소 후 새 메모를 입력해주세요."
+                    "저장: ㄱㄱ / 응 / 좋아  |  취소: ㄴㄴ / 취소"
                 )
                 return
 
