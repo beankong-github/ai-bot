@@ -317,6 +317,21 @@ def generate_weekly_report_content(stats: dict, habits_text: str, events_text: s
     }
 
 
+def generate_dm_reply(text: str) -> str:
+    """DM 자유 대화에 대상혁 페르소나로 짧은 리액션을 생성한다."""
+    persona = _load_persona()
+    prompt = f"""{persona}
+
+---
+
+사용자가 말을 걸어왔다. 페르소나에 맞게 짧게 리액션해줘.
+2문장 이내, 자연스럽게. 다른 말 하지 마.
+
+사용자: "{text}"
+"""
+    return _call_gemini(prompt) or "..."
+
+
 def generate_memo_title(content: str) -> str:
     """메모 내용에서 짧은 제목을 생성한다. 실패 시 현재 시각 문자열을 반환."""
     prompt = f"""다음 메모 내용을 보고 어울리는 짧은 제목을 한국어로 만들어줘.

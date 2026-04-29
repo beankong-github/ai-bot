@@ -18,7 +18,7 @@ from gemini_module import (
     parse_todo_and_comment, generate_memo_title, suggest_tags,
     get_remaining_rpd, RPD_LIMIT, RPD_WARN_THRESHOLD,
     generate_day_brief_content, generate_weekly_report_content,
-    get_rpd_stats,
+    get_rpd_stats, generate_dm_reply,
 )
 from google_calendar_module import (
     add_event,
@@ -245,6 +245,45 @@ HELP_SCHEDULE = (
     "예) 내일 3시 강남역 미팅\n"
     "예) 다음 주 화요일 치과 예약\n"
     "예) 5월 3일 종일 휴가"
+)
+
+HELP_DM = (
+    "대상혁 봇 전체 사용 가이드\n"
+    "\n"
+    "📅 일정 채널\n"
+    "자연어로 일정을 입력하면 Google Calendar에 자동 등록됩니다.\n"
+    "예) 내일 3시 강남역 미팅 / 5월 3일 종일 휴가\n"
+    "\n"
+    "✅ Todo 채널\n"
+    "할 일과 습관을 관리합니다.\n"
+    "!조회              오늘 할 일 + 습관 목록\n"
+    "!할일 <내용>        할 일 추가\n"
+    "!습관 <내용>        반복 습관 추가\n"
+    "!완료 <번호>        완료 처리\n"
+    "!취소 <번호>        완료 → 미완료 전환\n"
+    "!삭제 <번호>        미완료 항목 삭제\n"
+    "!수정 <번호> <내용>  항목 수정\n"
+    "자연어도 지원됩니다.\n"
+    "\n"
+    "📥 메모 채널\n"
+    "자유롭게 입력하면 버퍼에 쌓이고, 5분 후 자동 저장됩니다.\n"
+    "/done [제목]        즉시 저장 (제목 생략 시 AI 자동 생성)\n"
+    "ㄱㄱ / ㅇㅇ          미리보기 확인 후 저장 확정\n"
+    "ㄴㄴ / 취소          저장 취소\n"
+    "#태그명             태그 사용 (없으면 자동 추가)\n"
+    "!태그              태그 목록 조회\n"
+    "!태그삭제 <태그명>   태그 삭제\n"
+    "!통계              Gemini API 호출 통계\n"
+    "\n"
+    "💬 이 대화창 (DM)\n"
+    "!help              이 도움말\n"
+    "!통계              Gemini API 호출 통계\n"
+    "그 외 메시지       대상혁과 자유 대화\n"
+    "\n"
+    "🌅 브리프 (자동 발송)\n"
+    "모닝 브리프  매일 08:00 — 오늘 일정 + 할 일 + 습관 연속 기록\n"
+    "데이 브리프  매일 22:00 — 오늘 기록 요약 + AI 질문·총평\n"
+    "주간 보고서  매주 일요일 21:00 — 주간 통계 + AI 총평"
 )
 
 HELP_DAILY = (
@@ -609,8 +648,11 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
 
         else:
-            # DM 명령어
-            if text.strip() == "!통계":
+            # DM — 명령어 처리 후 일반 텍스트는 대상혁 자유 대화
+            stripped = text.strip()
+            if stripped in ("!help", "!도움말"):
+                await msg.reply_text(HELP_DM)
+            elif stripped == "!통계":
                 s = get_rpd_stats(days=7)
                 if s["days_with_data"] == 0:
                     await msg.reply_text("아직 통계 데이터가 없습니다. 며칠 사용 후 다시 확인해주세요.")
@@ -623,6 +665,11 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         f"(데이터 {s['days_with_data']}일치 기준)\n\n"
                         f"일일 한도: {RPD_LIMIT}회"
                     )
+            elif stripped.startswith("!"):
+                await msg.reply_text("알 수 없는 명령어입니다. !help 로 도움말을 확인하세요.")
+            else:
+                reply = generate_dm_reply(text)
+                await msg.reply_text(reply + _rpd_warning())
 
     except Exception as e:
         logging.error(f"처리 실패: {e}")
