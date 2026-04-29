@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from dotenv import load_dotenv
@@ -48,9 +49,14 @@ async def _flush_memo(bot, chat_id: str, title: str | None = None):
     combined = "\n\n".join(messages)
     final_title = title or generate_memo_title(combined)
 
-    # 등록된 태그가 있으면 AI 추천, 없으면 Gemini 호출 생략
+    # 메모 내용에 #태그 있으면 그걸 쓰고, 없을 때만 Gemini 추천 호출
     available_tags = get_tags_list()
-    recommended_tags = suggest_tags(combined, available_tags) if available_tags else []
+    content_tags = [t for t in (m.lstrip('#') for m in re.findall(r'#\S+', combined))
+                    if t in available_tags]
+    if content_tags:
+        recommended_tags = content_tags
+    else:
+        recommended_tags = suggest_tags(combined, available_tags) if available_tags else []
 
     file_id = save_memo(combined, title=final_title, tags=recommended_tags)
     _pending_drafts[chat_id] = file_id
