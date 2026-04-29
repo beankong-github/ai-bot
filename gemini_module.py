@@ -23,32 +23,83 @@ RPD_WARN_THRESHOLD = 30
 _last_remaining_rpd: int = RPD_LIMIT
 
 
-def _increment_rpd() -> int:
-    """오늘 Gemini 호출 수를 1 증가시키고 남은 횟수를 반환한다. 날짜가 바뀌면 자동 초기화."""
-    global _last_remaining_rpd
-    today = datetime.now().strftime("%Y-%m-%d")
-    counter = {"date": today, "count": 0}
+_HISTORY_KEEP_DAYS = 30  # 최대 보관 일수
 
+
+def _load_counter() -> dict:
     if os.path.exists(RPD_COUNTER_PATH):
         try:
             with open(RPD_COUNTER_PATH, 'r') as f:
-                data = json.load(f)
-            if data.get("date") == today:
-                counter = data
+                return json.load(f)
         except (json.JSONDecodeError, KeyError):
             pass
+    return {"date": "", "count": 0, "history": {}}
 
-    counter["count"] += 1
+
+def _save_counter(data: dict):
     with open(RPD_COUNTER_PATH, 'w') as f:
-        json.dump(counter, f)
+        json.dump(data, f, indent=2)
 
-    _last_remaining_rpd = max(0, RPD_LIMIT - counter["count"])
+
+def _increment_rpd() -> int:
+    """오늘 Gemini 호출 수를 1 증가시키고 남은 횟수를 반환한다.
+
+    날짜가 바뀌면 전날 카운트를 history에 저장하고 초기화한다.
+    history는 최근 _HISTORY_KEEP_DAYS일 분만 유지한다.
+    """
+    global _last_remaining_rpd
+    today = datetime.now().strftime("%Y-%m-%d")
+    data = _load_counter()
+
+    if data.get("date") != today:
+        # 날짜 바뀜 — 어제 카운트를 history에 보존
+        prev_date = data.get("date", "")
+        prev_count = data.get("count", 0)
+        history: dict = data.get("history", {})
+        if prev_date and prev_count > 0:
+            history[prev_date] = prev_count
+        # 오래된 기록 정리
+        cutoff = sorted(history)[-_HISTORY_KEEP_DAYS:] if len(history) > _HISTORY_KEEP_DAYS else list(history)
+        history = {k: history[k] for k in cutoff}
+        data = {"date": today, "count": 0, "history": history}
+
+    data["count"] = data.get("count", 0) + 1
+    _save_counter(data)
+
+    _last_remaining_rpd = max(0, RPD_LIMIT - data["count"])
     return _last_remaining_rpd
 
 
 def get_remaining_rpd() -> int:
     """마지막 Gemini 호출 이후 남은 오늘 RPD를 반환한다."""
     return _last_remaining_rpd
+
+
+def get_rpd_stats(days: int = 7) -> dict:
+    """최근 N일간 Gemini 호출 통계를 반환한다.
+
+    반환: {"today": N, "avg": N, "max": N, "days_with_data": N}
+    """
+    data = _load_counter()
+    today = datetime.now().strftime("%Y-%m-%d")
+    today_count = data.get("count", 0) if data.get("date") == today else 0
+    history: dict = data.get("history", {})
+
+    # 최근 days일 기록만 추출 (오늘 제외)
+    recent = {k: v for k, v in history.items() if k < today}
+    recent_counts = sorted(recent.items())[-days:]
+
+    all_counts = [c for _, c in recent_counts] + ([today_count] if today_count > 0 else [])
+
+    if not all_counts:
+        return {"today": today_count, "avg": 0.0, "max": 0, "days_with_data": 0}
+
+    return {
+        "today": today_count,
+        "avg": round(sum(all_counts) / len(all_counts), 1),
+        "max": max(all_counts),
+        "days_with_data": len(all_counts),
+    }
 
 
 def _call_gemini(prompt: str) -> str | None:
