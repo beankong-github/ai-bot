@@ -424,9 +424,31 @@ def edit_todo(item_number: int, new_text: str) -> bool:
     if not (1 <= item_number <= num_habits + len(todo_lines)):
         return False
 
-    # 습관 번호는 수정 불가
     if item_number <= num_habits:
-        return False
+        habit_name = habits[item_number - 1]["name"]
+
+        # habits.md에서 이름 변경
+        for h in habits:
+            if h["name"] == habit_name:
+                h["name"] = new_text
+                break
+        _write_file(service, habits_id, _habits_to_content(habits))
+
+        # daily 파일 습관 섹션에서 이름 변경 (완료 상태·시각 유지)
+        for i, line in enumerate(sections["habits"]):
+            stripped = line.strip()
+            if not (stripped.startswith("- [ ]") or stripped.startswith("- [x]")):
+                continue
+            name = stripped.replace("- [ ] ", "").replace("- [x] ", "").split(" ✅")[0].strip()
+            if name == habit_name:
+                if stripped.startswith("- [x]"):
+                    time_suffix = (" ✅" + stripped.split("✅", 1)[1]) if "✅" in stripped else ""
+                    sections["habits"][i] = f"- [x] {new_text}{time_suffix}"
+                else:
+                    sections["habits"][i] = f"- [ ] {new_text}"
+                break
+        _write_file(service, daily_id, _build_daily_content(sections))
+        return True
 
     todo_idx = item_number - num_habits - 1
     line_idx, line_text = todo_lines[todo_idx]
@@ -445,11 +467,16 @@ def edit_todo(item_number: int, new_text: str) -> bool:
     return True
 
 
-def delete_todo(item_number: int) -> bool:
-    """get_today_todos() 기준 번호로 미완료 할 일 항목을 삭제한다.
+def delete_todo(item_number: int) -> bool | str:
+    """get_today_todos() 기준 번호로 항목을 삭제한다.
 
-    완료된 항목은 삭제할 수 없다 (False 반환).
-    습관 번호는 삭제할 수 없다 (False 반환).
+    반환값:
+      True          — 삭제 성공
+      False         — 존재하지 않는 번호 또는 완료된 할 일 항목
+      "has_history" — 완료 기록이 있는 습관 (삭제 불가, 수정만 가능)
+
+    습관은 완료 기록이 없으면 삭제 가능.
+    완료된 할 일 항목은 삭제 불가.
     """
     service = get_drive_service()
     todo_folder_id = _get_folder_id(service, "notes", "Todo")
@@ -470,7 +497,24 @@ def delete_todo(item_number: int) -> bool:
         return False
 
     if item_number <= num_habits:
-        return False
+        habit = habits[item_number - 1]
+        if habit["completed_dates"]:
+            return "has_history"
+
+        # 완료 기록 없는 습관: habits.md + daily에서 제거
+        habit_name = habit["name"]
+        updated = [h for h in habits if h["name"] != habit_name]
+        _write_file(service, habits_id, _habits_to_content(updated))
+
+        sections["habits"] = [
+            line for line in sections["habits"]
+            if not (
+                (line.strip().startswith("- [ ]") or line.strip().startswith("- [x]")) and
+                line.strip().replace("- [ ] ", "").replace("- [x] ", "").split(" ✅")[0].strip() == habit_name
+            )
+        ]
+        _write_file(service, daily_id, _build_daily_content(sections))
+        return True
 
     todo_idx = item_number - num_habits - 1
     line_idx, line_text = todo_lines[todo_idx]

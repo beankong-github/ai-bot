@@ -133,9 +133,14 @@ async def handle_todo_channel(msg, text: str):
             await msg.reply_text("번호를 입력해주세요.\n예: !삭제 3")
             return
         num = int(num_str)
-        success = delete_todo(num)
-        if success:
+        result = delete_todo(num)
+        if result is True:
             await msg.reply_text(f"🗑️ {num}번을 삭제했습니다.")
+        elif result == "has_history":
+            await msg.reply_text(
+                f"❌ {num}번 습관은 완료 기록이 있어 삭제할 수 없습니다.\n"
+                "이름 수정은 가능합니다. (!수정 번호 새이름)"
+            )
         else:
             await msg.reply_text(
                 f"❌ {num}번을 삭제할 수 없습니다.\n"
@@ -218,11 +223,16 @@ async def handle_todo_channel(msg, text: str):
     elif intent == "delete_todo":
         num = parsed.get("number")
         if num:
-            success = delete_todo(int(num))
-            if success:
+            result = delete_todo(int(num))
+            if result is True:
                 reply = f"🗑️ {num}번을 삭제했습니다."
                 if comment:
                     reply += f"\n\n{comment}"
+            elif result == "has_history":
+                reply = (
+                    f"❌ {num}번 습관은 완료 기록이 있어 삭제할 수 없습니다.\n"
+                    "이름 수정은 가능합니다. (!수정 번호 새이름)"
+                )
             else:
                 reply = (
                     f"❌ {num}번을 삭제할 수 없습니다.\n"
