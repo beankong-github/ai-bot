@@ -23,6 +23,39 @@ logging.basicConfig(
 )
 
 
+HELP_TODO = (
+    "✅ Todo 채널 명령어\n"
+    "\n"
+    "!조회              오늘 할 일 + 습관 목록 보기\n"
+    "!할일 <내용>        할 일 추가\n"
+    "!습관 <내용>        매일 반복 습관 추가\n"
+    "!완료 <번호>        항목 완료 처리\n"
+    "!취소 <번호>        완료 항목 미완료로 되돌리기\n"
+    "!삭제 <번호>        미완료 항목 삭제\n"
+    "!수정 <번호> <내용>  항목 텍스트 수정\n"
+    "\n"
+    "자연어도 됩니다.\n"
+    "예) 헬스장 가기 추가해줘 / 3번 완료했어 / 오늘 할 일 보여줘"
+)
+
+HELP_SCHEDULE = (
+    "📅 일정 채널 사용법\n"
+    "\n"
+    "자연어로 일정을 입력하면 Google Calendar에 자동 등록됩니다.\n"
+    "\n"
+    "예) 내일 3시 강남역 미팅\n"
+    "예) 다음 주 화요일 치과 예약\n"
+    "예) 5월 3일 종일 휴가"
+)
+
+HELP_DAILY = (
+    "📥 일상 메모 채널 사용법\n"
+    "\n"
+    "텍스트를 입력하면 Google Drive Inbox에 .md 파일로 저장됩니다.\n"
+    "태그 파싱 및 /done 확정 기능은 Phase 4에서 추가될 예정입니다."
+)
+
+
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "안녕하세요! 대상혁입니다.\n열심히 기록하세요. 나태해질 생각 하지 마세요 😤\n\n"
@@ -47,6 +80,10 @@ async def handle_todo_channel(msg, text: str):
     그 외 자연어는 Gemini로 의도 파싱 + 페르소나 코멘트 생성.
     """
     # ── ! 명령어 직접 처리 ──────────────────────────────────────────────────────
+    if text.strip() in ("!help", "!도움말"):
+        await msg.reply_text(HELP_TODO)
+        return
+
     if text.strip() == "!조회":
         await msg.reply_text(get_today_todos())
         return
@@ -235,6 +272,9 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     try:
         if chat_id == CH_SCHEDULE:
+            if text.strip() in ("!help", "!도움말"):
+                await msg.reply_text(HELP_SCHEDULE)
+                return
             # 자연어를 Gemini로 파싱해서 Google Calendar에 등록한다.
             success, result_msg = add_event(text)
             if success:
@@ -249,6 +289,9 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await handle_todo_channel(msg, text)
 
         elif chat_id == CH_DAILY:
+            if text.strip() in ("!help", "!도움말"):
+                await msg.reply_text(HELP_DAILY)
+                return
             # 태그 파싱과 묶음 저장(Phase 4)은 미구현 — 현재는 단건 즉시 저장
             save_memo(text)
             await msg.reply_text("📝 저장했습니다.")
