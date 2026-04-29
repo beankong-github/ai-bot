@@ -611,10 +611,8 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
 
         else:
-            # DM 또는 미등록 채널 — 브리프 답변이면 처리, 아니면 메모 저장
-            if not await _handle_brief_reply(chat_id, text, msg):
-                save_memo(text)
-                await msg.reply_text("📝 저장했습니다.")
+            # DM 또는 미등록 채널 — 브리프 답변이면 처리, 아니면 무시
+            await _handle_brief_reply(chat_id, text, msg)
 
     except Exception as e:
         logging.error(f"처리 실패: {e}")
