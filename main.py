@@ -32,6 +32,7 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CH_SCHEDULE = os.getenv("TELEGRAM_CH_SCHEDULE")  # 📅 일정 채널
 CH_TODO     = os.getenv("TELEGRAM_CH_TODO")       # ✅ Todo 채널
 CH_DAILY    = os.getenv("TELEGRAM_CH_DAILY")      # 📥 일상 메모 채널
+CH_OWNER    = os.getenv("TELEGRAM_OWNER_ID")      # 👤 브리프 수신용 1:1 DM 채팅 ID
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -193,21 +194,45 @@ async def send_weekly_report(bot, chat_id: str):
         logging.error(f"주간 보고서 전송 실패: {e}")
 
 
+async def _handle_brief_reply(chat_id: str, text: str, msg) -> bool:
+    """브리프 답변 상태면 처리하고 True를 반환한다. 상태 없거나 타임아웃이면 False."""
+    if chat_id not in _awaiting_brief_reply:
+        return False
+    brief_type, brief_ts = _awaiting_brief_reply[chat_id]
+    if datetime.now().timestamp() - brief_ts > BRIEF_REPLY_TIMEOUT:
+        del _awaiting_brief_reply[chat_id]
+        return False
+    del _awaiting_brief_reply[chat_id]
+    if brief_type == "morning":
+        success, result_msg = add_event(text)
+        if success:
+            await msg.reply_text(f"📅 일정 추가\n{result_msg}" + _rpd_warning())
+        else:
+            add_todo(text)
+            await msg.reply_text(f"✅ 할 일 추가\n{text}" + _rpd_warning())
+    else:  # "day"
+        save_memo(text, title="데이 브리프 답변")
+        await msg.reply_text("📝 저장했습니다.")
+    return True
+
+
 async def _setup_scheduler(application):
     """봇 초기화 후 브리프 스케줄러를 시작한다."""
-    if not CH_DAILY:
-        logging.warning("CH_DAILY 미설정 — 브리프 스케줄러 비활성화")
+    brief_target = CH_OWNER or CH_DAILY
+    if not brief_target:
+        logging.warning("TELEGRAM_OWNER_ID / CH_DAILY 미설정 — 브리프 스케줄러 비활성화")
         return
     bot = application.bot
-    _scheduler.add_job(send_morning_brief, 'cron', hour=8,  minute=0, args=[bot, CH_DAILY])
-    _scheduler.add_job(send_day_brief,     'cron', hour=22, minute=0, args=[bot, CH_DAILY])
+    _scheduler.add_job(send_morning_brief, 'cron', hour=8,  minute=0, args=[bot, brief_target])
+    _scheduler.add_job(send_day_brief,     'cron', hour=22, minute=0, args=[bot, brief_target])
     _scheduler.add_job(
         send_weekly_report, 'cron',
         day_of_week='sun', hour=21, minute=0,
-        args=[bot, CH_DAILY],
+        args=[bot, brief_target],
     )
     _scheduler.start()
-    logging.info("브리프 스케줄러 시작 (모닝 08:00 / 데이 22:00 / 주간 일 21:00)")
+    target_label = "DM (OWNER)" if CH_OWNER else "CH_DAILY"
+    logging.info(f"브리프 스케줄러 시작 → {target_label} (모닝 08:00 / 데이 22:00 / 주간 일 21:00)")
 
 
 HELP_TODO = (
@@ -250,6 +275,10 @@ HELP_DAILY = (
     "!태그              등록된 태그 목록 보기\n"
     "!태그삭제 <태그명>   태그 삭제"
 )
+
+
+async def chatid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"이 채팅 ID: {update.message.chat_id}")
 
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -555,22 +584,8 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
 
             # ── 브리프 답변 처리 (15분 이내 답변만) ──────────────────────────────────
-            if chat_id in _awaiting_brief_reply:
-                brief_type, brief_ts = _awaiting_brief_reply[chat_id]
-                if datetime.now().timestamp() - brief_ts <= BRIEF_REPLY_TIMEOUT:
-                    del _awaiting_brief_reply[chat_id]
-                    if brief_type == "morning":
-                        success, result_msg = add_event(text)
-                        if success:
-                            await msg.reply_text(f"📅 일정 추가\n{result_msg}" + _rpd_warning())
-                        else:
-                            add_todo(text)
-                            await msg.reply_text(f"✅ 할 일 추가\n{text}" + _rpd_warning())
-                    else:  # "day"
-                        save_memo(text, title="데이 브리프 답변")
-                        await msg.reply_text("📝 저장했습니다.")
-                    return
-                del _awaiting_brief_reply[chat_id]
+            if await _handle_brief_reply(chat_id, text, msg):
+                return
 
             # ── 메모 버퍼에 누적 ─────────────────────────────────────────────────
             is_new_bundle = not _memo_buffers.get(chat_id)
@@ -596,9 +611,10 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
 
         else:
-            # 등록되지 않은 채널이나 DM은 일상 메모로 저장한다.
-            save_memo(text)
-            await msg.reply_text("📝 저장했습니다.")
+            # DM 또는 미등록 채널 — 브리프 답변이면 처리, 아니면 메모 저장
+            if not await _handle_brief_reply(chat_id, text, msg):
+                save_memo(text)
+                await msg.reply_text("📝 저장했습니다.")
 
     except Exception as e:
         logging.error(f"처리 실패: {e}")
@@ -608,6 +624,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(TOKEN).post_init(_setup_scheduler).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("chatid", chatid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POSTS & filters.TEXT, handle_message))
     logging.info("대상혁 봇 시작!")
