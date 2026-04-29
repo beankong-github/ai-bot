@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 
 from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo
-from gemini_module import parse_todo_and_comment
+from gemini_module import parse_todo_and_comment, generate_memo_title
 from google_calendar_module import add_event
 
 load_dotenv()
@@ -292,8 +292,8 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if text.strip() in ("!help", "!도움말"):
                 await msg.reply_text(HELP_DAILY)
                 return
-            # 태그 파싱과 묶음 저장(Phase 4)은 미구현 — 현재는 단건 즉시 저장
-            save_memo(text)
+            title = generate_memo_title(text)
+            save_memo(text, title=title)
             await msg.reply_text("📝 저장했습니다.")
 
         else:

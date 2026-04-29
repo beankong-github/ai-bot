@@ -215,7 +215,7 @@ def _get_daily_file_id(service, todo_folder_id: str, date_str: str) -> str:
 
 # ── 일상 메모 (Inbox) ──────────────────────────────────────────────────────────
 
-def save_memo(content: str, tags: list[str] | None = None, status: str = "draft") -> str:
+def save_memo(content: str, title: str | None = None, tags: list[str] | None = None, status: str = "draft") -> str:
     """일상 메모 채널 메시지를 Inbox에 .md 파일로 저장한다."""
     service = get_drive_service()
     inbox_id = _get_folder_id(service, "notes", "Inbox")
@@ -223,6 +223,7 @@ def save_memo(content: str, tags: list[str] | None = None, status: str = "draft"
     now = datetime.now()
     filename = now.strftime("%Y-%m-%d-%H%M%S") + ".md"
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
+    display_title = title or now.strftime("%Y-%m-%d %H:%M")
 
     file_content = (
         f"---\n"
@@ -231,6 +232,7 @@ def save_memo(content: str, tags: list[str] | None = None, status: str = "draft"
         f"tags: {tags_str}\n"
         f"status: {status}\n"
         f"---\n\n"
+        f"# {display_title}\n\n"
         f"{content}\n"
     )
     return _create_file(service, filename, inbox_id, file_content)
