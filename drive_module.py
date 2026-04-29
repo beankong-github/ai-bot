@@ -2,7 +2,7 @@ import io
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
@@ -376,6 +376,53 @@ def get_week_memo_stats(start_date: str, end_date: str) -> dict:
         for tag in info["tags"]:
             stats["by_tag"][tag] = stats["by_tag"].get(tag, 0) + 1
     return stats
+
+
+def get_habit_streaks() -> str:
+    """각 습관의 현재 연속 기록과 최고 연속 기록을 텍스트로 반환한다."""
+    service = get_drive_service()
+    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    habits = _parse_habits(_read_file(service, _get_habits_file_id(service, todo_folder_id)))
+    if not habits:
+        return ""
+
+    today = datetime.now().date()
+    lines = []
+
+    for h in habits:
+        dates = sorted({
+            datetime.strptime(d.strip(), "%Y-%m-%d").date()
+            for d in h["completed_dates"] if d.strip()
+        })
+
+        # 최고 연속 기록
+        best = 0
+        streak = 0
+        for i, d in enumerate(dates):
+            streak = streak + 1 if (i > 0 and (d - dates[i - 1]).days == 1) else 1
+            best = max(best, streak)
+
+        # 현재 연속 기록 — 마지막 완료일이 오늘 또는 어제여야 유효
+        if not dates or dates[-1] < today - timedelta(days=1):
+            current = 0
+        else:
+            current = 0
+            check = dates[-1]
+            date_set = set(dates)
+            while check in date_set:
+                current += 1
+                check -= timedelta(days=1)
+
+        if best == 0:
+            lines.append(f"• {h['name']}: 아직 기록 없음")
+        elif current >= 3:
+            lines.append(f"• {h['name']}: 🔥 {current}일 연속 (최고 {best}일)")
+        elif current > 0:
+            lines.append(f"• {h['name']}: ✅ {current}일 연속 (최고 {best}일)")
+        else:
+            lines.append(f"• {h['name']}: 연속 끊김 (최고 {best}일)")
+
+    return "\n".join(lines)
 
 
 def get_week_habit_stats(start_date: str, end_date: str) -> str:

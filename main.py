@@ -12,7 +12,7 @@ from drive_module import (
     save_memo, add_todo, add_habit, get_today_todos, complete_todo,
     edit_todo, delete_todo, uncomplete_todo, get_tags, get_tags_list,
     add_tag, delete_tag, confirm_memo,
-    get_today_memos, get_week_memo_stats, get_week_habit_stats, save_report,
+    get_today_memos, get_week_memo_stats, get_week_habit_stats, get_habit_streaks, save_report,
 )
 from gemini_module import (
     parse_todo_and_comment, generate_memo_title, suggest_tags,
@@ -105,10 +105,15 @@ async def send_morning_brief(bot, chat_id: str):
     try:
         events_text = get_today_events_text()
         todos_text = get_today_todos()
+        streaks_text = get_habit_streaks()
         brief = (
             f"🌅 좋은 아침입니다!\n\n"
             f"📅 오늘 일정\n{events_text}\n\n"
             f"{todos_text}\n\n"
+        )
+        if streaks_text:
+            brief += f"🔥 습관 연속 기록\n{streaks_text}\n\n"
+        brief += (
             f"📌 오늘 계획이 있으시면 각 채널로 알려주세요.\n"
             f"• 📅 일정 채널 — 새 일정 추가\n"
             f"• ✅ Todo 채널 — 할 일 추가"
@@ -126,6 +131,7 @@ async def send_day_brief(bot, chat_id: str):
             return
         events_text = get_today_events_text()
         tomorrow_text = get_tomorrow_events_text()
+        streaks_text = get_habit_streaks()
         ai_content = generate_day_brief_content(memos, events_text)
 
         tag_counts: dict[str, int] = {}
@@ -140,6 +146,10 @@ async def send_day_brief(bot, chat_id: str):
         brief = (
             f"🌙 오늘 하루 수고하셨습니다!\n\n"
             f"📝 오늘 기록 ({len(memos)}건)\n{tag_text}\n\n"
+        )
+        if streaks_text:
+            brief += f"🔥 습관 연속 기록\n{streaks_text}\n\n"
+        brief += (
             f"📅 오늘 일정\n{events_text}\n\n"
             f"📅 내일 일정\n{tomorrow_text}\n\n"
             f"💬 {ai_content['question']}\n\n"
