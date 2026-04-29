@@ -238,6 +238,70 @@ def save_memo(content: str, title: str | None = None, tags: list[str] | None = N
     return _create_file(service, filename, inbox_id, file_content)
 
 
+# ── 태그 관리 ──────────────────────────────────────────────────────────────────
+#
+# tags.md 형식:
+#   # 태그 목록
+#
+#   - 운동
+#   - 독서
+
+def _get_tags_file_id(service, inbox_id: str) -> str:
+    file_id = _find_file(service, "tags.md", inbox_id)
+    if not file_id:
+        file_id = _create_file(service, "tags.md", inbox_id, "# 태그 목록\n")
+    return file_id
+
+
+def _parse_tags(content: str) -> list[str]:
+    return [l.strip()[2:].strip() for l in content.splitlines()
+            if l.strip().startswith("- ")]
+
+
+def _tags_to_content(tags: list[str]) -> str:
+    result = "# 태그 목록\n"
+    for tag in tags:
+        result += f"\n- {tag}"
+    return result + "\n"
+
+
+def get_tags() -> str:
+    """등록된 태그 목록을 텔레그램 메시지 형식으로 반환한다."""
+    service = get_drive_service()
+    inbox_id = _get_folder_id(service, "notes", "Inbox")
+    tags_id = _get_tags_file_id(service, inbox_id)
+    tags = _parse_tags(_read_file(service, tags_id))
+    if not tags:
+        return "등록된 태그가 없습니다.\n!태그추가 태그명 으로 추가해보세요."
+    return "🏷️ 태그 목록\n\n" + "\n".join(f"• {t}" for t in tags)
+
+
+def add_tag(tag: str) -> bool:
+    """태그를 추가한다. 이미 존재하면 False 반환."""
+    service = get_drive_service()
+    inbox_id = _get_folder_id(service, "notes", "Inbox")
+    tags_id = _get_tags_file_id(service, inbox_id)
+    tags = _parse_tags(_read_file(service, tags_id))
+    if tag in tags:
+        return False
+    tags.append(tag)
+    _write_file(service, tags_id, _tags_to_content(tags))
+    return True
+
+
+def delete_tag(tag: str) -> bool:
+    """태그를 삭제한다. 존재하지 않으면 False 반환."""
+    service = get_drive_service()
+    inbox_id = _get_folder_id(service, "notes", "Inbox")
+    tags_id = _get_tags_file_id(service, inbox_id)
+    tags = _parse_tags(_read_file(service, tags_id))
+    if tag not in tags:
+        return False
+    tags.remove(tag)
+    _write_file(service, tags_id, _tags_to_content(tags))
+    return True
+
+
 # ── Todo 공개 API ──────────────────────────────────────────────────────────────
 
 def add_todo(text: str):

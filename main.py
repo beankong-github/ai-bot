@@ -4,7 +4,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 from dotenv import load_dotenv
 import os
 
-from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo
+from drive_module import save_memo, add_todo, add_habit, get_today_todos, complete_todo, edit_todo, delete_todo, uncomplete_todo, get_tags, add_tag, delete_tag
 from gemini_module import parse_todo_and_comment, generate_memo_title, get_remaining_rpd, RPD_WARN_THRESHOLD
 from google_calendar_module import add_event
 
@@ -59,7 +59,11 @@ HELP_DAILY = (
     "📥 일상 메모 채널 사용법\n"
     "\n"
     "텍스트를 입력하면 Google Drive Inbox에 .md 파일로 저장됩니다.\n"
-    "태그 파싱 및 /done 확정 기능은 Phase 4에서 추가될 예정입니다."
+    "\n"
+    "🏷️ 태그 명령어\n"
+    "!태그              등록된 태그 목록 보기\n"
+    "!태그추가 <태그명>   태그 추가\n"
+    "!태그삭제 <태그명>   태그 삭제"
 )
 
 
@@ -310,6 +314,31 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if text.strip() in ("!help", "!도움말"):
                 await msg.reply_text(HELP_DAILY)
                 return
+
+            if text.strip() == "!태그":
+                await msg.reply_text(get_tags())
+                return
+
+            if text.startswith("!태그추가 "):
+                tag = text[len("!태그추가 "):].strip()
+                if not tag:
+                    await msg.reply_text("태그명을 입력해주세요.\n예: !태그추가 운동")
+                    return
+                success = add_tag(tag)
+                await msg.reply_text(f"🏷️ '{tag}' 태그를 추가했습니다." if success
+                                     else f"이미 등록된 태그입니다: {tag}")
+                return
+
+            if text.startswith("!태그삭제 "):
+                tag = text[len("!태그삭제 "):].strip()
+                if not tag:
+                    await msg.reply_text("태그명을 입력해주세요.\n예: !태그삭제 운동")
+                    return
+                success = delete_tag(tag)
+                await msg.reply_text(f"🗑️ '{tag}' 태그를 삭제했습니다." if success
+                                     else f"등록되지 않은 태그입니다: {tag}")
+                return
+
             title = generate_memo_title(text)
             save_memo(text, title=title)
             await msg.reply_text("📝 저장했습니다." + _rpd_warning())
