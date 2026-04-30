@@ -21,7 +21,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TOKEN_PATH = os.path.join(BASE_DIR, 'token.json')
 
 # Obsidian Vault 폴더 ID — Drive 웹에서 Vault 폴더 열기 → URL 마지막 경로
-# 미설정 시 Drive 루트에 notes/ 폴더 생성
+# 미설정 시 Drive 루트에 Notes/ 폴더 생성
 VAULT_FOLDER_ID = os.getenv("DRIVE_VAULT_FOLDER_ID")
 
 
@@ -219,7 +219,7 @@ def _get_daily_file_id(service, todo_folder_id: str, date_str: str) -> str:
 def save_memo(content: str, title: str | None = None, tags: list[str] | None = None, status: str = "draft") -> str:
     """일상 메모 채널 메시지를 Inbox에 .md 파일로 저장한다."""
     service = get_drive_service()
-    inbox_id = _get_folder_id(service, "notes", "Inbox")
+    inbox_id = _get_folder_id(service, "Notes", "Inbox")
 
     now = datetime.now()
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
@@ -274,7 +274,7 @@ def get_tags_list() -> list[str]:
     """등록된 태그 목록을 리스트로 반환한다."""
     try:
         service = get_drive_service()
-        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        inbox_id = _get_folder_id(service, "Notes", "Inbox")
         tags_id = _get_tags_file_id(service, inbox_id)
         return _parse_tags(_read_file(service, tags_id))
     except Exception as e:
@@ -286,7 +286,7 @@ def get_tags() -> str:
     """등록된 태그 목록을 텔레그램 메시지 형식으로 반환한다."""
     try:
         service = get_drive_service()
-        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        inbox_id = _get_folder_id(service, "Notes", "Inbox")
         tags_id = _get_tags_file_id(service, inbox_id)
         tags = _parse_tags(_read_file(service, tags_id))
         if not tags:
@@ -301,7 +301,7 @@ def add_tag(tag: str) -> bool:
     """태그를 추가한다. 이미 존재하면 False 반환."""
     try:
         service = get_drive_service()
-        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        inbox_id = _get_folder_id(service, "Notes", "Inbox")
         tags_id = _get_tags_file_id(service, inbox_id)
         tags = _parse_tags(_read_file(service, tags_id))
         if tag in tags:
@@ -345,7 +345,7 @@ def get_today_memos() -> list[dict]:
     """오늘 날짜의 Inbox 메모 목록을 반환한다."""
     try:
         service = get_drive_service()
-        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        inbox_id = _get_folder_id(service, "Notes", "Inbox")
         date_str = datetime.now().strftime("%Y-%m-%d")
         query = (
             f"'{inbox_id}' in parents and name contains '{date_str}'"
@@ -375,7 +375,7 @@ def get_week_memo_stats(start_date: str, end_date: str) -> dict:
     """
     try:
         service = get_drive_service()
-        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        inbox_id = _get_folder_id(service, "Notes", "Inbox")
         query = f"'{inbox_id}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'"
         files = service.files().list(q=query, fields="files(id, name)").execute().get("files", [])
         stats: dict = {"total": 0, "by_tag": {}, "memos": []}
@@ -405,7 +405,7 @@ def get_habit_streaks() -> str:
     """각 습관의 현재 연속 기록과 최고 연속 기록을 텍스트로 반환한다."""
     try:
         service = get_drive_service()
-        todo_folder_id = _get_folder_id(service, "notes", "Todo")
+        todo_folder_id = _get_folder_id(service, "Notes", "Todo")
         habits = _parse_habits(_read_file(service, _get_habits_file_id(service, todo_folder_id)))
     except Exception as e:
         logging.error(f"습관 스트릭 조회 실패: {e}")
@@ -456,7 +456,7 @@ def get_week_habit_stats(start_date: str, end_date: str) -> str:
     """날짜 범위의 습관 이행 통계 텍스트를 반환한다."""
     try:
         service = get_drive_service()
-        todo_folder_id = _get_folder_id(service, "notes", "Todo")
+        todo_folder_id = _get_folder_id(service, "Notes", "Todo")
         habits = _parse_habits(_read_file(service, _get_habits_file_id(service, todo_folder_id)))
         if not habits:
             return "등록된 습관 없음"
@@ -505,7 +505,7 @@ def delete_tag(tag: str) -> bool:
     """태그를 삭제한다. 존재하지 않으면 False 반환."""
     try:
         service = get_drive_service()
-        inbox_id = _get_folder_id(service, "notes", "Inbox")
+        inbox_id = _get_folder_id(service, "Notes", "Inbox")
         tags_id = _get_tags_file_id(service, inbox_id)
         tags = _parse_tags(_read_file(service, tags_id))
         if tag not in tags:
@@ -523,7 +523,7 @@ def delete_tag(tag: str) -> bool:
 def add_todo(text: str):
     """오늘 daily 파일의 '## 할 일' 섹션에 항목 추가."""
     service = get_drive_service()
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    todo_folder_id = _get_folder_id(service, "Notes", "Todo")
     date_str = datetime.now().strftime("%Y-%m-%d")
 
     habits_id = _get_habits_file_id(service, todo_folder_id)
@@ -544,7 +544,7 @@ def add_habit(text: str) -> bool:
     이미 존재하는 습관이면 False 반환.
     """
     service = get_drive_service()
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    todo_folder_id = _get_folder_id(service, "Notes", "Todo")
     date_str = datetime.now().strftime("%Y-%m-%d")
 
     habits_id = _get_habits_file_id(service, todo_folder_id)
@@ -576,7 +576,7 @@ def get_today_todos() -> str:
     except Exception as e:
         logging.error(f"할 일 조회 실패 (Drive 인증): {e}")
         return "❌ 할 일 목록을 불러오지 못했습니다. 잠시 후 다시 시도해주세요."
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    todo_folder_id = _get_folder_id(service, "Notes", "Todo")
     date_str = datetime.now().strftime("%Y-%m-%d")
 
     habits_id = _get_habits_file_id(service, todo_folder_id)
@@ -628,7 +628,7 @@ def complete_todo(item_number: int) -> bool:
     할 일 완료: daily 파일에 완료 시각 기록.
     """
     service = get_drive_service()
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    todo_folder_id = _get_folder_id(service, "Notes", "Todo")
     date_str = datetime.now().strftime("%Y-%m-%d")
     time_str = datetime.now().strftime("%H:%M")
 
@@ -690,7 +690,7 @@ def edit_todo(item_number: int, new_text: str) -> bool:
     완료된 항목은 텍스트를 바꾸되 완료 상태(✅ 시각)를 유지한다.
     """
     service = get_drive_service()
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    todo_folder_id = _get_folder_id(service, "Notes", "Todo")
     date_str = datetime.now().strftime("%Y-%m-%d")
 
     habits_id = _get_habits_file_id(service, todo_folder_id)
@@ -763,7 +763,7 @@ def delete_todo(item_number: int) -> bool | str:
     완료된 할 일 항목은 삭제 불가.
     """
     service = get_drive_service()
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    todo_folder_id = _get_folder_id(service, "Notes", "Todo")
     date_str = datetime.now().strftime("%Y-%m-%d")
 
     habits_id = _get_habits_file_id(service, todo_folder_id)
@@ -819,7 +819,7 @@ def uncomplete_todo(item_number: int) -> bool:
     미완료 항목에 호출하면 False 반환.
     """
     service = get_drive_service()
-    todo_folder_id = _get_folder_id(service, "notes", "Todo")
+    todo_folder_id = _get_folder_id(service, "Notes", "Todo")
     date_str = datetime.now().strftime("%Y-%m-%d")
 
     habits_id = _get_habits_file_id(service, todo_folder_id)
