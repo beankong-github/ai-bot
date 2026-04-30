@@ -343,8 +343,8 @@ def generate_dm_reply(text: str) -> str:
     return _call_gemini(prompt) or "..."
 
 
-def generate_memo_title(content: str) -> str:
-    """메모 내용에서 짧은 제목을 생성한다. 실패 시 현재 시각 문자열을 반환."""
+def generate_memo_title(content: str) -> str | None:
+    """메모 내용에서 짧은 제목을 생성한다. 실패 시 None 반환."""
     prompt = f"""다음 메모 내용을 보고 어울리는 짧은 제목을 한국어로 만들어줘.
 20자 이내로, 핵심 내용이 담기게. 제목만 출력해. 따옴표나 기호 없이.
 
@@ -353,4 +353,4 @@ def generate_memo_title(content: str) -> str:
     result = _call_gemini(prompt)
     if result:
         return result.strip()[:30]
-    return datetime.now().strftime("%Y-%m-%d %H:%M")
+    return None

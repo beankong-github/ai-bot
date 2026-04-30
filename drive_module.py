@@ -224,8 +224,11 @@ def save_memo(content: str, title: str | None = None, tags: list[str] | None = N
     now = datetime.now()
     tags_str = "[" + ", ".join(tags) + "]" if tags else "[]"
     display_title = title or now.strftime("%Y-%m-%d %H:%M")
-    safe_title = re.sub(r'[/\\:*?"<>|]', '', display_title).strip()
-    filename = f"{now.strftime('%Y-%m-%d %H:%M')} {safe_title}.md" if safe_title else now.strftime("%Y-%m-%d-%H%M%S") + ".md"
+    if title:
+        safe_title = re.sub(r'[/\\:*?"<>|]', '', title).strip()
+        filename = f"{now.strftime('%Y-%m-%d %H:%M')} {safe_title}.md" if safe_title else now.strftime("%Y-%m-%d-%H%M%S") + ".md"
+    else:
+        filename = now.strftime("%Y-%m-%d-%H%M%S") + ".md"
 
     file_content = (
         f"---\n"

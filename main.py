@@ -49,6 +49,23 @@ _CANCEL_WORDS  = {"ㄴㄴ", "취소", "아니", "no", "싫어", "!취소"}
 _memo_buffers: dict[str, list[str]] = {}   # chat_id → 누적 메시지 리스트
 _memo_timers:  dict[str, asyncio.Task] = {} # chat_id → 5분 자동 flush 태스크
 _pending_drafts: dict[str, str] = {}        # chat_id → Drive 파일 ID (확인 대기 중)
+_memo_titles: dict[str, str] = {}           # chat_id → 명시적 제목 (본문 제외)
+
+_TITLE_PATTERNS = [
+    re.compile(r'^(?:제목|title)\s*:\s*(.+)$', re.IGNORECASE),
+    re.compile(r'^[""""](.+)[""""]$'),   # 영문/한국어 큰따옴표
+    re.compile(r"^['''](.+)[''']$"),    # 영문/한국어 작은따옴표
+    re.compile(r'^\[(.+)\]$'),           # 대괄호
+]
+
+
+def _extract_explicit_title(text: str) -> str | None:
+    s = text.strip()
+    for pat in _TITLE_PATTERNS:
+        m = pat.match(s)
+        if m:
+            return m.group(1).strip()
+    return None
 
 MEMO_FLUSH_DELAY = 300  # 5분
 
@@ -61,11 +78,12 @@ async def _flush_memo(bot, chat_id: str, title: str | None = None):
     title을 넘기면 그대로 사용, 없으면 Gemini가 자동 생성한다.
     """
     messages = _memo_buffers.pop(chat_id, [])
+    explicit_title = _memo_titles.pop(chat_id, None)
     if not messages:
         return
 
     combined = "\n\n".join(messages)
-    final_title = title or generate_memo_title(combined)
+    final_title = title or explicit_title or generate_memo_title(combined)
 
     # 본문에 #태그 있으면 YAML에 반영 + 새 태그면 목록에도 자동 추가 + 본문에서 제거
     content_tags = list(dict.fromkeys(
@@ -268,6 +286,7 @@ HELP_DM = (
     "📥 메모 채널\n"
     "자유롭게 입력하면 버퍼에 쌓이고, 5분 후 자동 저장됩니다.\n"
     "/done [제목]        즉시 저장 (제목 생략 시 AI 자동 생성)\n"
+    "/끝 [제목]          /done 과 동일\n"
     "ㄱㄱ / ㅇㅇ          미리보기 확인 후 저장 확정\n"
     "ㄴㄴ / 취소          저장 취소\n"
     "#태그명             태그 사용 (없으면 자동 추가)\n"
@@ -293,6 +312,7 @@ HELP_DAILY = (
     "\n"
     "💾 메모 묶음\n"
     "/done [제목]        즉시 저장 및 미리보기 (제목 생략 시 AI 자동 생성)\n"
+    "/끝 [제목]          /done 과 동일\n"
     "저장 확인: ㄱㄱ / 응 / 좋아 / 네 / !확인\n"
     "저장 취소: ㄴㄴ / 취소 / 아니 / !취소\n"
     "\n"
@@ -616,18 +636,38 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
 
             # ── /done — 즉시 flush (브리프 답변 대기 상태도 해제) ──────────────────
-            if text.strip() == "/done" or text.startswith("/done "):
+            if text.strip() in ("/done", "/끝") or text.startswith("/done ") or text.startswith("/끝 "):
                 if not _memo_buffers.get(chat_id):
+                    _memo_titles.pop(chat_id, None)  # 내용 없이 /done 시 제목도 정리
                     await msg.reply_text("묶을 메모가 없습니다.")
                     return
                 if chat_id in _memo_timers:
                     _memo_timers.pop(chat_id).cancel()
-                manual_title = text[len("/done"):].strip() or None
+                cmd = "/끝" if text.startswith("/끝") else "/done"
+                manual_title = text[len(cmd):].strip() or None
                 await _flush_memo(ctx.bot, chat_id, title=manual_title)
                 return
 
             # ── 메모 버퍼에 누적 ─────────────────────────────────────────────────
             is_new_bundle = not _memo_buffers.get(chat_id)
+
+            # 첫 메시지에서 명시적 제목 패턴 감지 — 본문에는 추가하지 않음
+            if is_new_bundle and not _memo_titles.get(chat_id):
+                extracted = _extract_explicit_title(text)
+                if extracted:
+                    _memo_titles[chat_id] = extracted
+                    bot = ctx.bot
+                    async def _auto_flush_title():
+                        await asyncio.sleep(MEMO_FLUSH_DELAY)
+                        await _flush_memo(bot, chat_id)
+                        _memo_timers.pop(chat_id, None)
+                    _memo_timers[chat_id] = asyncio.create_task(_auto_flush_title())
+                    await msg.reply_text(
+                        f"📝 제목: {extracted}\n"
+                        "메모 내용을 입력하세요. /done 또는 5분 후 자동 저장됩니다."
+                    )
+                    return
+
             _memo_buffers.setdefault(chat_id, []).append(text)
 
             # 타이머 리셋
