@@ -34,6 +34,7 @@ CH_SCHEDULE = os.getenv("TELEGRAM_CH_SCHEDULE")  # 📅 일정 채널
 CH_TODO     = os.getenv("TELEGRAM_CH_TODO")       # ✅ Todo 채널
 CH_DAILY    = os.getenv("TELEGRAM_CH_DAILY")      # 📥 일상 메모 채널
 CH_OWNER    = os.getenv("TELEGRAM_OWNER_ID")      # 👤 브리프 수신용 1:1 DM 채팅 ID
+CH_REPORT   = os.getenv("TELEGRAM_CH_REPORT")     # 📊 보고서 전용 채널 (미설정 시 CH_OWNER → CH_DAILY 폴백)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -227,17 +228,19 @@ async def _setup_scheduler(application):
     if not brief_target:
         logging.warning("TELEGRAM_OWNER_ID / CH_DAILY 미설정 — 브리프 스케줄러 비활성화")
         return
+    report_target = CH_REPORT or CH_OWNER or CH_DAILY
     bot = application.bot
     _scheduler.add_job(send_morning_brief, 'cron', hour=8,  minute=0, args=[bot, brief_target])
     _scheduler.add_job(send_day_brief,     'cron', hour=22, minute=0, args=[bot, brief_target])
     _scheduler.add_job(
         send_weekly_report, 'cron',
         day_of_week='sun', hour=21, minute=0,
-        args=[bot, brief_target],
+        args=[bot, report_target],
     )
     _scheduler.start()
-    target_label = "DM (OWNER)" if CH_OWNER else "CH_DAILY"
-    logging.info(f"브리프 스케줄러 시작 → {target_label} (모닝 08:00 / 데이 22:00 / 주간 일 21:00)")
+    brief_label  = "DM (OWNER)" if CH_OWNER else "CH_DAILY"
+    report_label = "CH_REPORT" if CH_REPORT else brief_label
+    logging.info(f"브리프 스케줄러 시작 → {brief_label} (모닝 08:00 / 데이 22:00) / 주간 보고서 → {report_label} (일 21:00)")
 
 
 HELP_TODO = (
