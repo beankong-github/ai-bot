@@ -592,6 +592,9 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     if tag:
                         is_new = add_tag(tag)
                         results.append(f"#{tag} {'추가됨' if is_new else '(기존)'}")
+                # 진행 중인 메모 버퍼가 있으면 태그를 버퍼에도 추가 → flush 시 YAML에 반영됨
+                if _memo_buffers.get(chat_id):
+                    _memo_buffers[chat_id].append(text)
                 await msg.reply_text("🏷️ " + "  ".join(results))
                 return
 
